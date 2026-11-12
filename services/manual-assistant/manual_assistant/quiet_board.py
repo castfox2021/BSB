@@ -275,6 +275,8 @@ class QuietBoard:
             )
         selected = next((v for v in versions if v["id"] == version), None)
         runtime = self.runtime(version)
+        settings = self.store.settings()
+        initial_cap = settings.get("initial_capital_krw", "150000")
         return {
             "runtime": runtime,
             "operation_mode": "QUIET_FOLLOW",
@@ -292,8 +294,8 @@ class QuietBoard:
             "summary": {
                 "today_realized_krw": decimal_text(daily),
                 "holding_count": len(holdings),
-                "initial_capital_krw": "150000",
-                "cash_krw": account["cash"] if account else "150000",
+                "initial_capital_krw": initial_cap,
+                "cash_krw": account["cash"] if account else initial_cap,
             },
             "buys": buys,
             "sells": sells,

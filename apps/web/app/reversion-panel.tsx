@@ -78,7 +78,7 @@ export default function ReversionPanel({data}:{data?:Reversion|null}){
       <div className="flex flex-wrap items-center justify-between gap-2 border-b border-amber-900/40 pb-3">
         <div>
           <h2 className="text-xl font-bold sm:text-2xl text-white">급락 반등 · 가상 자동손절</h2>
-          <p className="mt-0.5 text-xs text-amber-200/80">독립 가상 자본 150,000원 전용 · 실전 주문 미실행</p>
+          <p className="mt-0.5 text-xs text-amber-200/80">독립 가상 자본 전용 · 실전 주문 미실행</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <span className="rounded-full border border-amber-800 bg-amber-950/70 px-3 py-1 text-xs text-amber-200">

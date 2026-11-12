@@ -107,7 +107,7 @@ class PrivateSync:
             pending_orders=len(self.pending),
             read_only=True,
             live_order_enabled=False,
-            strategy_capital_krw="150000",
+            strategy_capital_krw=self.store.settings().get("initial_capital_krw", "150000"),
         )
 
     def guard(self):

@@ -118,17 +118,18 @@ class ManualOrders:
                 ).fetchone()
                 is not None
             )
-        return dict(
-            active=self.active,
-            has_open_orders=has_open,
-            manual_only=not (self.automation and self.automation.active),
-            auto_order_enabled=bool(self.automation and self.automation.active),
-            configured=self.private.credentials is not None,
-            initial_capital_krw="150000",
-            max_entry_krw="50000",
-            daily_loss_limit_krw="3000",
-            orders=rows,
-        )
+            policy = self.store.settings()
+            return dict(
+                active=self.active,
+                has_open_orders=has_open,
+                manual_only=not (self.automation and self.automation.active),
+                auto_order_enabled=bool(self.automation and self.automation.active),
+                configured=self.private.credentials is not None,
+                initial_capital_krw=policy.get("initial_capital_krw", "150000"),
+                max_entry_krw=policy.get("max_entry_krw", "50000"),
+                daily_loss_limit_krw=policy.get("daily_loss_alert_krw", "3000"),
+                orders=rows,
+            )
 
     def stop(self):
         if self.automation and self.automation.active:
@@ -278,15 +279,14 @@ class ManualOrders:
                 raise OrderBlocked("연속 손실 한도 도달")
             if len(positions) >= policy["max_positions"] and market not in positions:
                 raise OrderBlocked("보유 종목 한도 도달")
-            if D(ledger["cash_krw"]) > D("150000"):
+            cap = D(policy.get("initial_capital_krw", "150000"))
+            if D(ledger["cash_krw"]) > cap:
                 # Profits do not automatically grow order sizing or total strategy capital.
-                available = D("150000")
+                available = cap
             else:
                 available = D(ledger["cash_krw"])
-            if sum(D(p["cost_basis_krw"]) for p in positions.values()) + budget > D(
-                "150000"
-            ):
-                raise OrderBlocked("총 전략 운용 자본 150,000원 초과")
+            if sum(D(p["cost_basis_krw"]) for p in positions.values()) + budget > cap:
+                raise OrderBlocked(f"총 전략 운용 자본 {int(cap):,}원 초과")
             if available - budget < D(policy["minimum_cash_reserve_krw"]):
                 raise OrderBlocked("전략 현금 여유 부족")
             actual = amount(str(chance.get("bid_account", {}).get("balance", "")), True)

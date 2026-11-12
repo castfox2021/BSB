@@ -224,7 +224,8 @@ class Engine:
             row = conn.execute(
                 "SELECT * FROM paper_accounts WHERE version_id=?", (version["id"],)
             ).fetchone()
-        cash = D(row["cash"]) if row else D("150000")
+        initial_cap = self.store.settings().get("initial_capital_krw", "150000")
+        cash = D(row["cash"]) if row else D(initial_cap)
         realized = D(row["realized"]) if row else D(0)
         state = json.loads(row["position"]) if row else {"holdings": {}, "seen": {}}
         holdings = state["holdings"]
