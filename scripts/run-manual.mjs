@@ -6,7 +6,7 @@ const python=resolve(root,'services/manual-assistant/.venv/bin/python');
 if(!existsSync(python)) { console.error('먼저 npm run manual:setup 을 실행하세요.');process.exit(1); }
 const apiPort=process.env.MANUAL_API_PORT ?? '18000', webPort=process.env.MANUAL_WEB_PORT ?? '13000', webHost=process.env.MANUAL_WEB_HOST ?? '0.0.0.0';
 if(![apiPort,webPort].every(p=>/^\d+$/.test(p)&&Number(p)>=1024&&Number(p)<=65535)||apiPort===webPort) throw new Error('invalid local ports');
-const env={...process.env,NEXT_TELEMETRY_DISABLED:'1',MANUAL_API_URL:`http://127.0.0.1:${apiPort}`,NEXT_PUBLIC_MANUAL_API_PORT:apiPort,BSB_MANUAL_ORIGINS:process.env.BSB_MANUAL_ORIGINS ?? `http://127.0.0.1:${webPort},http://localhost:${webPort},https://careerbook.kr,http://careerbook.kr`};
+const env={...process.env,NEXT_TELEMETRY_DISABLED:'1',MANUAL_API_URL:`http://127.0.0.1:${apiPort}`,NEXT_PUBLIC_MANUAL_API_PORT:apiPort,BSB_MANUAL_ORIGINS:process.env.BSB_MANUAL_ORIGINS ?? `http://127.0.0.1:${webPort},http://localhost:${webPort},https://careerbook.kr,http://careerbook.kr,http://careerbook.kr:${webPort},https://careerbook.kr:${webPort},http://www.careerbook.kr:${webPort},https://www.careerbook.kr:${webPort}`};
 const browserEnv={...env};
 for(const key of Object.keys(browserEnv)) if(/BITHUMB|SECRET|ACCESS_KEY|AUTHORIZATION/i.test(key)) delete browserEnv[key];
 const isProd=process.env.NODE_ENV==='production'||existsSync(resolve(root,'apps/web/.next/BUILD_ID'));

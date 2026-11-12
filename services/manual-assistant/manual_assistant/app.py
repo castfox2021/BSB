@@ -122,7 +122,8 @@ def create_app(
         os.getenv("BSB_MANUAL_DB", decimal_text(ROOT / "data/manual-assistant.sqlite3"))
     )
     allowed = origins or os.getenv(
-        "BSB_MANUAL_ORIGINS", "http://127.0.0.1:13000,http://localhost:13000,https://careerbook.kr,http://careerbook.kr"
+        "BSB_MANUAL_ORIGINS",
+        "http://127.0.0.1:13000,http://localhost:13000,https://careerbook.kr,http://careerbook.kr,http://careerbook.kr:13000,https://careerbook.kr:13000,http://www.careerbook.kr:13000,https://www.careerbook.kr:13000",
     ).split(",")
     extra_hosts = [h.strip() for h in os.getenv("BSB_ALLOWED_HOSTS", "").split(",") if h.strip()]
     trusted_hosts = {"127.0.0.1", "localhost", "careerbook.kr", "www.careerbook.kr", *extra_hosts}
