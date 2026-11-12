@@ -2,9 +2,9 @@
   "name": "@bsb/web",
   "private": true,
   "scripts": {
-    "dev": "next dev --webpack --hostname 127.0.0.1",
+    "dev": "next dev --webpack",
     "build": "next build --webpack",
-    "start": "next start --hostname 127.0.0.1"
+    "start": "next start"
   },
   "dependencies": {
     "@tailwindcss/postcss": "^4.1.0",

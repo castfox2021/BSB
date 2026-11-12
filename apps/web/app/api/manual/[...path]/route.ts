@@ -10,7 +10,8 @@ async function forward(request: Request, context: Context) {
   ...(process.env.BSB_ALLOWED_HOSTS?.split(',').map(h=>h.trim().toLowerCase())??[])
  ]);
  const rawHost = (request.headers.get('host') ?? incoming.host).split(':')[0].toLowerCase();
- if (!allowedHosts.has(incoming.hostname.toLowerCase()) && !allowedHosts.has(rawHost)) {
+ const isIp = /^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(rawHost) || /^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(incoming.hostname);
+ if (!allowedHosts.has(incoming.hostname.toLowerCase()) && !allowedHosts.has(rawHost) && !isIp && process.env.BSB_ALLOW_ALL_HOSTS !== '1') {
   return Response.json({error:'host access denied'},{status:403});
  }
  const proto = request.headers.get('x-forwarded-proto') ?? (incoming.protocol.replace(':','') || 'http');
