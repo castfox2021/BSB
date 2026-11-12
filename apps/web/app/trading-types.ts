@@ -21,7 +21,7 @@ export const quantityText=(v?:string|number|null)=>{
   return new Intl.NumberFormat('ko-KR',{maximumSignificantDigits:6}).format(n);
 };
 export async function api<T>(path:string,method='GET',body?:unknown):Promise<T>{
- const response=await fetch(`/api/manual/${path}`,{method,cache:'no-store',headers:{'content-type':'application/json'},body:body===undefined?undefined:JSON.stringify(body)});
+ const response=await fetch(`/api/manual/${path}`,{method,cache:'no-store',credentials:'same-origin',headers:{'content-type':'application/json'},body:body===undefined?undefined:JSON.stringify(body)});
  const data=await response.json();
  if(!response.ok)throw new Error(typeof(data.error??data.detail)==='string'?(data.error??data.detail):JSON.stringify(data.error??data.detail??response.status));
  return data as T;
