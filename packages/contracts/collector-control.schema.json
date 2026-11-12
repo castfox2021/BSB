@@ -1,0 +1,165 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "CollectorControlEvent",
+  "oneOf": [
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version",
+        "event_id",
+        "source",
+        "exchange_at",
+        "received_at",
+        "event_type",
+        "shards",
+        "invalid_messages"
+      ],
+      "properties": {
+        "schema_version": {
+          "const": "1"
+        },
+        "event_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "source": {
+          "enum": [
+            "mock",
+            "bithumb_public"
+          ]
+        },
+        "exchange_at": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "Z$"
+        },
+        "received_at": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "Z$"
+        },
+        "event_type": {
+          "const": "collector.status"
+        },
+        "invalid_messages": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "shards": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "symbols",
+              "connection_id",
+              "connected"
+            ],
+            "properties": {
+              "symbols": {
+                "type": "array",
+                "uniqueItems": true,
+                "items": {
+                  "type": "string",
+                  "pattern": "^KRW-[A-Z0-9]+$"
+                }
+              },
+              "connection_id": {
+                "type": "string"
+              },
+              "connected": {
+                "type": "boolean"
+              },
+              "last_data_at": {
+                "anyOf": [
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "type": "string",
+                    "format": "date-time",
+                    "pattern": "Z$"
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version",
+        "event_id",
+        "source",
+        "exchange_at",
+        "received_at",
+        "event_type",
+        "markets"
+      ],
+      "properties": {
+        "schema_version": {
+          "const": "1"
+        },
+        "event_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "source": {
+          "enum": [
+            "mock",
+            "bithumb_public"
+          ]
+        },
+        "exchange_at": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "Z$"
+        },
+        "received_at": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "Z$"
+        },
+        "event_type": {
+          "const": "collector.universe"
+        },
+        "markets": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "required": [
+              "symbol"
+            ],
+            "properties": {
+              "symbol": {
+                "type": "string",
+                "pattern": "^KRW-[A-Z0-9]+$"
+              },
+              "korean_name": {
+                "type": "string"
+              },
+              "english_name": {
+                "type": "string"
+              },
+              "market_warning": {
+                "type": "string"
+              },
+              "source": {
+                "enum": [
+                  "mock",
+                  "bithumb_public"
+                ]
+              }
+            },
+            "additionalProperties": false
+          }
+        }
+      }
+    }
+  ]
+}

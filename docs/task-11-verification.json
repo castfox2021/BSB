@@ -1,0 +1,42 @@
+{
+  "task": 11,
+  "verified_date": "2026-11-11",
+  "schema_version": 7,
+  "checks": {
+    "python_tests": 150,
+    "web_tests": 14,
+    "ruff": "passed",
+    "mypy_modules": 30,
+    "eslint": "passed",
+    "typescript": "passed",
+    "production_build": "passed",
+    "source_secret_scan": "passed; local .env not read; no Git repository present"
+  },
+  "production_readonly_observation": {
+    "connected_markets": 490,
+    "market_count": 490,
+    "btc_candles": 91,
+    "journal_positions": 0,
+    "automatic_active": false,
+    "manual_active": false,
+    "open_orders": false,
+    "fixture_present": false
+  },
+  "ui_fixture_verification": [
+    "red up / blue down candle and volume",
+    "signal, order and actual-fill markers; hollow partial fills",
+    "replay play/pause and time slider",
+    "3-minute timeframe switch",
+    "memo and tags persisted",
+    "separate post-hoc local review persisted"
+  ],
+  "fixture_screenshot": "task-11-chart-ui.jpg",
+  "actual_orders_sent_during_development": false,
+  "strategy_promoted_during_development": false,
+  "limitations": [
+    "Missing original historical evidence is not recreated or backdated.",
+    "Local model re-inference is post-hoc and is not out-of-sample performance.",
+    "Rule-based review is explicitly labelled when AI/model input is unavailable.",
+    "No live financial execution test was performed."
+  ]
+}

@@ -1,0 +1,38 @@
+name: CI
+on: [push, pull_request]
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+      - run: pip install './services/common[dev]'
+      - run: ruff check services/common tests infra/migrations
+      - run: mypy services/common/bsb_service
+      - run: pytest services/common/tests
+      - run: docker compose config --quiet
+      - run: docker compose up -d --build --wait --wait-timeout 240
+      - run: python tests/integration/smoke.py
+      - run: docker compose exec -T postgres createdb -U bsb bsb_test_ci
+      - name: PostgreSQL and Redis recovery tests
+        run: >-
+          docker compose run --rm --no-deps --user root
+          -v "$PWD:/app"
+          -e TEST_DATABASE_URL=postgresql://bsb:bsb_local_only@postgres:5432/bsb_test_ci
+          -e TEST_REDIS_URL=redis://redis:6379/15
+          candle-builder sh -c "pip install -q -e './services/common[dev]' && pytest -q tests/integration/test_pipeline_db.py"
+      - if: always()
+        run: docker compose logs --no-color --tail 100
+      - if: always()
+        run: docker compose down

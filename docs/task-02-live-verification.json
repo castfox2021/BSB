@@ -1,0 +1,35 @@
+{
+  "verified_at": "2026-11-08T06:48:30.581526+00:00",
+  "source": "bithumb_public",
+  "markets": 488,
+  "shards": 5,
+  "subscribed_symbols": 488,
+  "transport_ready": true,
+  "entries_allowed": false,
+  "history_complete": false,
+  "clock_skew_detected": true,
+  "last_lag_seconds_by_shard": [
+    -2.062286,
+    -2.119329,
+    -2.080552,
+    -2.111357,
+    -2.08963
+  ],
+  "counts": {
+    "clock_skew_events": 44257,
+    "market.orderbook": 44223,
+    "market.orderbook.REALTIME": 43738,
+    "market.orderbook.SNAPSHOT": 485,
+    "stale_events": 988,
+    "invalid_messages": 3,
+    "market.trade": 683,
+    "market.trade.SNAPSHOT": 488,
+    "market.ticker": 612,
+    "market.ticker.SNAPSHOT": 488,
+    "market.ticker.REALTIME": 124,
+    "market.trade.REALTIME": 195
+  },
+  "btc_latest_event_types": [
+    "market.orderbook"
+  ]
+}

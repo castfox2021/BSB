@@ -1,0 +1,102 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "MarketTickerEvent",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "source",
+    "symbol",
+    "exchange_at",
+    "received_at",
+    "connection_id",
+    "stream_type",
+    "exchange_timestamp_unit",
+    "raw_exchange_timestamp",
+    "event_id",
+    "event_type",
+    "price",
+    "turnover_24h",
+    "volume_24h",
+    "market_state",
+    "market_warning",
+    "is_trading_suspended"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "1"
+    },
+    "source": {
+      "enum": [
+        "mock",
+        "bithumb_public"
+      ]
+    },
+    "symbol": {
+      "type": "string",
+      "pattern": "^KRW-[A-Z0-9]+$"
+    },
+    "exchange_at": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "Z$"
+    },
+    "received_at": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "Z$"
+    },
+    "connection_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "stream_type": {
+      "enum": [
+        "SNAPSHOT",
+        "REALTIME",
+        "UNKNOWN"
+      ]
+    },
+    "exchange_timestamp_unit": {
+      "enum": [
+        "milliseconds",
+        "microseconds"
+      ]
+    },
+    "raw_exchange_timestamp": {
+      "type": "string",
+      "pattern": "^[0-9]+$"
+    },
+    "event_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "event_type": {
+      "const": "market.ticker"
+    },
+    "price": {
+      "type": "string",
+      "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]+)?$"
+    },
+    "turnover_24h": {
+      "type": "string",
+      "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]+)?$"
+    },
+    "volume_24h": {
+      "type": "string",
+      "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]+)?$"
+    },
+    "market_state": {
+      "type": "string"
+    },
+    "market_warning": {
+      "type": "string"
+    },
+    "is_trading_suspended": {
+      "type": [
+        "boolean",
+        "null"
+      ]
+    }
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "schema_version": 5,
+  "automation_supported": true,
+  "automation_active": false,
+  "credentials_configured": false,
+  "approved_strategy_present": false,
+  "signal_history_total": 47,
+  "pages": 5,
+  "page_1_items": 10,
+  "page_2_items": 10,
+  "page_overlap": 0,
+  "python_tests_passed": 102,
+  "jest_tests_passed": 8,
+  "real_order_tests_performed": false
+}

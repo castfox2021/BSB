@@ -1,0 +1,31 @@
+{
+  "name": "bsb",
+  "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/contracts",
+    "packages/shared"
+  ],
+  "scripts": {
+    "build": "npm run build -w @bsb/api && npm run build -w @bsb/web",
+    "lint": "eslint .",
+    "typecheck": "tsc -p apps/api --noEmit && tsc -p apps/web --noEmit && tsc -p packages/contracts --noEmit",
+    "test": "jest --runInBand",
+    "manual:dev": "node scripts/run-manual.mjs",
+    "manual:setup": "bash scripts/setup-manual.sh",
+    "manual:test": "services/manual-assistant/.venv/bin/python -m pytest -q services/manual-assistant/tests",
+    "manual:start": "node scripts/manual-background.mjs start",
+    "manual:stop": "node scripts/manual-background.mjs stop",
+    "manual:status": "node scripts/manual-background.mjs status"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.0",
+    "@types/jest": "^30.0.0",
+    "@types/node": "^22.0.0",
+    "eslint": "^9.39.0",
+    "jest": "^30.2.0",
+    "ts-jest": "^29.4.5",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.46.0"
+  }
+}

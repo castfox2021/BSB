@@ -1,0 +1,137 @@
+name: bsb
+x-python: &python
+  build:
+    context: .
+    dockerfile: infra/docker/python.Dockerfile
+  environment: &python-env
+    DATABASE_URL: postgresql://${POSTGRES_USER:-bsb}:${POSTGRES_PASSWORD:-bsb_local_only}@postgres:5432/${POSTGRES_DB:-bsb}
+    REDIS_URL: redis://redis:6379/0
+    DATA_SOURCE: ${DATA_SOURCE:-mock}
+    TZ: UTC
+  depends_on: &dependencies
+    postgres:
+      condition: service_healthy
+    redis:
+      condition: service_healthy
+  restart: unless-stopped
+  healthcheck:
+    test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=6)"]
+    interval: 15s
+    timeout: 8s
+    retries: 5
+    start_period: 15s
+services:
+  postgres:
+    image: postgres:16-bookworm
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-bsb}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-bsb_local_only}
+      POSTGRES_DB: ${POSTGRES_DB:-bsb}
+      TZ: UTC
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+  redis:
+    image: redis:7-bookworm
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+  api:
+    build:
+      context: .
+      dockerfile: infra/docker/node.Dockerfile
+      args:
+        APP: api
+    environment: *python-env
+    depends_on: *dependencies
+    ports:
+      - "127.0.0.1:${API_PORT:-3001}:3001"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3001/api/v1/system/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 8s
+      retries: 5
+      start_period: 20s
+  web:
+    build:
+      context: .
+      dockerfile: infra/docker/node.Dockerfile
+      args:
+        APP: web
+    command: ["npm", "run", "start", "-w", "@bsb/web", "--", "--hostname", "0.0.0.0"]
+    ports:
+      - "127.0.0.1:${WEB_PORT:-3000}:3000"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+  market-collector:
+    <<: *python
+    command: ["uvicorn", "bsb_service.collector.app:app", "--host", "0.0.0.0", "--port", "8000", "--no-access-log"]
+    environment:
+      <<: *python-env
+      SERVICE_NAME: market-collector
+      COLLECTOR_SOURCE: ${COLLECTOR_SOURCE:-mock}
+      COLLECTOR_BATCH_SIZE: ${COLLECTOR_BATCH_SIZE:-100}
+      COLLECTOR_REFRESH_SECONDS: ${COLLECTOR_REFRESH_SECONDS:-300}
+      COLLECTOR_STALE_SECONDS: ${COLLECTOR_STALE_SECONDS:-15}
+      COLLECTOR_RECEIVE_TIMEOUT: ${COLLECTOR_RECEIVE_TIMEOUT:-30}
+      COLLECTOR_STREAM_MAXLEN: ${COLLECTOR_STREAM_MAXLEN:-100000}
+    ports:
+      - "127.0.0.1:${PYTHON_PORT:-8000}:8000"
+  candle-builder:
+    <<: *python
+    command: ["uvicorn", "bsb_service.pipeline.app:app", "--host", "0.0.0.0", "--port", "8000", "--no-access-log"]
+    environment:
+      <<: *python-env
+      SERVICE_NAME: candle-builder
+      PIPELINE_SOURCE: ${PIPELINE_SOURCE:-mock}
+      PIPELINE_BATCH_SIZE: ${PIPELINE_BATCH_SIZE:-200}
+      PIPELINE_LATENESS_SECONDS: ${PIPELINE_LATENESS_SECONDS:-40}
+      PIPELINE_MAX_DELAY_SECONDS: ${PIPELINE_MAX_DELAY_SECONDS:-15}
+      PIPELINE_HEARTBEAT_TIMEOUT: ${PIPELINE_HEARTBEAT_TIMEOUT:-15}
+    ports:
+      - "127.0.0.1:${PIPELINE_PORT:-8001}:8000"
+  scanner:
+    <<: *python
+    environment:
+      <<: *python-env
+      SERVICE_NAME: scanner
+  signal-engine:
+    <<: *python
+    environment:
+      <<: *python-env
+      SERVICE_NAME: signal-engine
+  paper-engine:
+    <<: *python
+    environment:
+      <<: *python-env
+      SERVICE_NAME: paper-engine
+  risk-engine:
+    <<: *python
+    environment:
+      <<: *python-env
+      SERVICE_NAME: risk-engine
+  backtester:
+    <<: *python
+    environment:
+      <<: *python-env
+      SERVICE_NAME: backtester
+volumes:
+  postgres_data:
+  redis_data:

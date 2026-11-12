@@ -1,0 +1,41 @@
+{
+  "task": "10-full-krw-scanner",
+  "verified_date": "2026-11-11",
+  "checks": {
+    "python_tests_passed": 130,
+    "web_tests_passed": 8,
+    "eslint": "passed",
+    "typescript": "passed",
+    "ruff": "passed",
+    "mypy_modules": 26,
+    "production_build": "passed",
+    "source_secret_scan": "passed; local .env not read; no Git repository present"
+  },
+  "actual_public_feed_observation": {
+    "krw_markets": 490,
+    "websocket_connected_markets": 490,
+    "turnover_floor": null,
+    "candidate_model_inferences_before_restart": 183,
+    "advisory_model_affects_live_strategy": false,
+    "dashboard_pagination": "page 2 of 25, 490 markets verified",
+    "sub_krw_prices_displayed": true
+  },
+  "test_fixture_scope": [
+    "dynamic market membership, sharding and candidate rotation",
+    "all-market candle aggregation and missing-data recovery",
+    "liquidity, spread, slippage, stale and abnormal-data guards",
+    "time-separated model validation and candidate-only inference",
+    "bounded ingestion under synthetic load"
+  ],
+  "financial_actions": {
+    "automatic_trading_active": false,
+    "actual_order_sent_during_verification": false,
+    "strategy_promoted_during_verification": false
+  },
+  "limitations": [
+    "Public-feed counts and candidate ranks change continuously.",
+    "Synthetic load checks do not establish production capacity guarantees.",
+    "Advisory model accuracy is not a profitability claim.",
+    "Live account execution was not exercised."
+  ]
+}

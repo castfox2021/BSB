@@ -1,0 +1,5 @@
+{
+  "trade": {"type":"trade","code":"KRW-BTC","trade_price":123456.12345678,"trade_volume":0.00000001,"ask_bid":"BID","trade_timestamp":1794096000123,"sequential_id":17940960001230000,"stream_type":"REALTIME"},
+  "ticker": {"type":"ticker","code":"KRW-BTC","trade_price":123456.12345678,"acc_trade_price_24h":1234567890.12345678,"acc_trade_volume_24h":10000.00000001,"timestamp":1794096000123,"stream_type":"REALTIME","market_state":"ACTIVE","is_trading_suspended":false,"market_warning":"NONE"},
+  "orderbook": {"type":"orderbook","code":"KRW-BTC","timestamp":1794096000123456,"stream_type":"REALTIME","orderbook_units":[{"ask_price":123457,"bid_price":123455,"ask_size":0.12345678,"bid_size":0.87654321},{"ask_price":123458,"bid_price":123454,"ask_size":1,"bid_size":2}]}
+}

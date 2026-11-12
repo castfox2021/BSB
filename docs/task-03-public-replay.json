@@ -1,0 +1,20 @@
+{
+  "verified_at": "2026-11-08T07:07:04.240476+00:00",
+  "kind": "retained-public-data-replay",
+  "source": "bithumb_public",
+  "sample_size": 500,
+  "result": {
+    "accepted": 500,
+    "duplicates": 0,
+    "rejected": 0,
+    "last_stream_id": "1794120389345-0"
+  },
+  "stored_event_types": [
+    {
+      "event_type": "market.orderbook",
+      "count": 500
+    }
+  ],
+  "stored_candles": 0,
+  "entries_allowed": false
+}

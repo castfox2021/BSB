@@ -1,0 +1,128 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Candle",
+  "type": "object",
+  "required": [
+    "source",
+    "symbol",
+    "timeframe",
+    "bucket_start",
+    "bucket_end",
+    "first_at",
+    "last_at",
+    "updated_at",
+    "open",
+    "high",
+    "low",
+    "close",
+    "volume",
+    "turnover",
+    "closed",
+    "complete",
+    "revised_after_close",
+    "trade_count",
+    "revision",
+    "first_event_id",
+    "last_event_id",
+    "quality_flags"
+  ],
+  "properties": {
+    "source": {
+      "enum": [
+        "mock",
+        "bithumb_public"
+      ]
+    },
+    "symbol": {
+      "type": "string",
+      "pattern": "^KRW-[A-Z0-9]+$"
+    },
+    "timeframe": {
+      "enum": [
+        60,
+        300
+      ]
+    },
+    "bucket_start": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "Z$"
+    },
+    "bucket_end": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "Z$"
+    },
+    "first_at": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "Z$"
+    },
+    "last_at": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "Z$"
+    },
+    "updated_at": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "Z$"
+    },
+    "open": {
+      "type": "string",
+      "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]+)?$"
+    },
+    "high": {
+      "type": "string",
+      "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]+)?$"
+    },
+    "low": {
+      "type": "string",
+      "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]+)?$"
+    },
+    "close": {
+      "type": "string",
+      "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]+)?$"
+    },
+    "volume": {
+      "type": "string",
+      "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]+)?$"
+    },
+    "turnover": {
+      "type": "string",
+      "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]+)?$"
+    },
+    "closed": {
+      "type": "boolean"
+    },
+    "complete": {
+      "type": "boolean"
+    },
+    "revised_after_close": {
+      "type": "boolean"
+    },
+    "trade_count": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "revision": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "first_event_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "last_event_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "quality_flags": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  },
+  "additionalProperties": false
+}

@@ -1,0 +1,27 @@
+{
+  "schema_version": 3,
+  "orders_supported": false,
+  "private_configured": false,
+  "market": {
+    "source": "bithumb_public",
+    "connected_markets": 490,
+    "market_count": 490,
+    "last_received_at": "2026-11-10T16:06:37.625556+00:00",
+    "new_buy_signals_enabled": false,
+    "seeded_markets": 45,
+    "recovery_pending": 0,
+    "clock_skew_detected": false,
+    "lag_ms_min": -11.937,
+    "lag_ms_max": 480.971,
+    "error": null,
+    "metrics": {
+      "events": 95842,
+      "duplicates": 0,
+      "invalid": 3,
+      "reconnects": 0,
+      "rest_calls": 46,
+      "signal_compute_ms": 160.16366400072002,
+      "processing_ms": 0.42400099846418016
+    }
+  }
+}
