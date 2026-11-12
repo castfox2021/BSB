@@ -26,3 +26,43 @@ export async function api<T>(path:string,method='GET',body?:unknown):Promise<T>{
  if(!response.ok)throw new Error(typeof(data.error??data.detail)==='string'?(data.error??data.detail):JSON.stringify(data.error??data.detail??response.status));
  return data as T;
 }
+
+export function openBithumb(symbol: string) {
+  if (typeof window === 'undefined') return;
+  const coin = symbol.replace(/^KRW-/, '').toUpperCase();
+  const webUrl = `https://www.bithumb.com/react/trade/order/${coin}-KRW`;
+
+  const ua = navigator.userAgent || '';
+  const isAndroid = /Android/i.test(ua);
+  const isIOS = /iPhone|iPad|iPod/i.test(ua);
+  const isMobile = isAndroid || isIOS;
+
+  if (!isMobile) {
+    // PC (데스크톱): 새 탭으로 빗썸 웹 주문창 열기
+    window.open(webUrl, '_blank', 'noopener,noreferrer');
+    return;
+  }
+
+  // 모바일 (Android): 안드로이드 크롬/삼성인터넷 표준 Intent 스킴
+  if (isAndroid) {
+    const intentUrl = `intent://react/trade/order/${coin}-KRW#Intent;scheme=bithumb;package=com.btckorea.bithumb;S.browser_fallback_url=${encodeURIComponent(webUrl)};end`;
+    window.location.href = intentUrl;
+    return;
+  }
+
+  // 모바일 (iOS): 커스텀 URL 스킴 호출 후 타임아웃 웹 폴백
+  if (isIOS) {
+    const appUrl = `bithumb://react/trade/order/${coin}-KRW`;
+    const start = Date.now();
+    window.location.href = appUrl;
+
+    setTimeout(() => {
+      if (Date.now() - start < 1500 && !document.hidden) {
+        window.location.href = webUrl;
+      }
+    }, 1200);
+    return;
+  }
+
+  window.location.href = webUrl;
+}

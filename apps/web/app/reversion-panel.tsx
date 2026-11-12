@@ -1,5 +1,5 @@
 import {pnlColor,signedMoney,signedRate,priceText} from './quiet-types';
-import {kst} from './trading-types';
+import {kst,openBithumb} from './trading-types';
 
 export type ReversionPosition={
   id:string;
@@ -109,7 +109,11 @@ export default function ReversionPanel({data}:{data?:Reversion|null}){
                 href={bithumbOrderUrl(item.symbol)}
                 target="_blank"
                 rel="noopener noreferrer"
-                title={`${coinLabel(item.coin_name, item.symbol)} 빗썸 주문 페이지 새창으로 열기`}
+                onClick={(e) => {
+                  e.preventDefault();
+                  openBithumb(item.symbol);
+                }}
+                title={`${coinLabel(item.coin_name, item.symbol)} 빗썸 주문 열기`}
                 className="group flex flex-wrap items-center justify-between gap-2.5 rounded-xl border border-amber-800/80 bg-amber-950/40 px-4 py-3 text-sm text-amber-200 shadow-sm transition hover:border-amber-500 hover:bg-amber-950/80 hover:shadow-md cursor-pointer"
               >
                 <div className="flex items-center gap-2">
