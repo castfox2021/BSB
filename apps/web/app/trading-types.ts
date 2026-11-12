@@ -43,16 +43,16 @@ export function openBithumb(symbol: string) {
     return;
   }
 
-  // 모바일 (Android): 안드로이드 크롬/삼성인터넷 표준 Intent 스킴
+  // 모바일 (Android): 빗썸 공식 App Link Intent (도메인 전체 경로를 전달하여 해당 코인 주문창으로 직접 진입)
   if (isAndroid) {
-    const intentUrl = `intent://react/trade/order/${coin}-KRW#Intent;scheme=bithumb;package=com.btckorea.bithumb;S.browser_fallback_url=${encodeURIComponent(webUrl)};end`;
+    const intentUrl = `intent://www.bithumb.com/react/trade/order/${coin}-KRW#Intent;scheme=https;package=com.btckorea.bithumb;S.browser_fallback_url=${encodeURIComponent(webUrl)};end`;
     window.location.href = intentUrl;
     return;
   }
 
-  // 모바일 (iOS): 커스텀 URL 스킴 호출 후 타임아웃 웹 폴백
+  // 모바일 (iOS): 코인 심볼 파라미터가 포함된 커스텀 스킴 시도 후 웹 폴백
   if (isIOS) {
-    const appUrl = `bithumb://react/trade/order/${coin}-KRW`;
+    const appUrl = `bithumb://trade?symbol=${coin}_KRW`;
     const start = Date.now();
     window.location.href = appUrl;
 
