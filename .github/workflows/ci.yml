@@ -3,6 +3,8 @@ on: [push, pull_request]
 jobs:
   checks:
     runs-on: ubuntu-latest
+    env:
+      BSB_PROJECT_ROOT: ${{ github.workspace }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -17,7 +19,7 @@ jobs:
       - run: npm run typecheck
       - run: npm test
       - run: npm run build
-      - run: pip install './services/common[dev]'
+      - run: pip install -e './services/common[dev]'
       - run: ruff check services/common tests infra/migrations
       - run: mypy services/common/bsb_service
       - run: pytest services/common/tests
