@@ -20,6 +20,9 @@ export default function QuietSettings({ board, onSaved }: { board: Board | null;
     minimum_cash_reserve_krw: string;
     daily_loss_alert_krw: string;
     max_positions: number;
+    stop_loss_rate: string;
+    take_profit_rate: string;
+    exclude_major_coins: boolean;
   } | null>(null);
   const [system, setSystem] = useState<unknown>(null);
 
@@ -42,6 +45,9 @@ export default function QuietSettings({ board, onSaved }: { board: Board | null;
           minimum_cash_reserve_krw: p.minimum_cash_reserve_krw ?? '50000',
           daily_loss_alert_krw: p.daily_loss_alert_krw ?? '3000',
           max_positions: p.max_positions ?? 2,
+          stop_loss_rate: p.stop_loss_rate ?? '0.008',
+          take_profit_rate: p.take_profit_rate ?? '0.012',
+          exclude_major_coins: Boolean(p.exclude_major_coins ?? false),
         });
       })
       .catch(() => setPolicyMessage('설정을 읽을 수 없습니다.'));
@@ -101,11 +107,14 @@ export default function QuietSettings({ board, onSaved }: { board: Board | null;
         minimum_cash_reserve_krw: String(Math.floor(minCash)),
         daily_loss_alert_krw: String(Math.floor(dailyLoss)),
         max_positions: maxPositions,
+        stop_loss_rate: form.stop_loss_rate,
+        take_profit_rate: form.take_profit_rate,
+        exclude_major_coins: form.exclude_major_coins,
       };
       const updated = await api<Policy>('settings', 'PATCH', patch);
       setPolicy(updated);
       setPolicyMessage(
-        `운용 기준을 저장했습니다. (기준 자본금 ${Number(updated.initial_capital_krw).toLocaleString('ko-KR')}원)`
+        `운용 기준을 저장했습니다. (기준 자본금 ${Number(updated.initial_capital_krw).toLocaleString('ko-KR')}원 · 손절 -${(Number(updated.stop_loss_rate) * 100).toFixed(1)}%)`
       );
       onSaved();
     } catch (e) {
@@ -249,6 +258,61 @@ export default function QuietSettings({ board, onSaved }: { board: Board | null;
                 onChange={(e) => setForm({ ...form, max_positions: Number(e.target.value) })}
               />
               <p className="mt-1.5 text-xs text-zinc-500">1 ~ 10종목</p>
+            </div>
+
+            <div>
+              <div className="flex items-center justify-between">
+                <label className="text-xs font-medium text-zinc-300">손절 / 목표 익절 기준 (비율)</label>
+                <button
+                  type="button"
+                  className={btnQuick}
+                  onClick={() =>
+                    setForm({
+                      ...form,
+                      stop_loss_rate: '0.013',
+                      take_profit_rate: '0.018',
+                      exclude_major_coins: true,
+                    })
+                  }
+                >
+                  알트 단타 최적화 (-1.3% / +1.8% / 메이저 제외)
+                </button>
+              </div>
+              <div className="mt-2 grid grid-cols-2 gap-3">
+                <div>
+                  <input
+                    aria-label="손절 비율"
+                    inputMode="decimal"
+                    className={`${input} block w-full text-sky-400`}
+                    value={form.stop_loss_rate}
+                    onChange={(e) => setForm({ ...form, stop_loss_rate: e.target.value })}
+                  />
+                  <p className="mt-1 font-mono text-[11px] text-zinc-500">
+                    손절 -{(Number(form.stop_loss_rate || 0) * 100).toFixed(1)}%
+                  </p>
+                </div>
+                <div>
+                  <input
+                    aria-label="목표 익절 비율"
+                    inputMode="decimal"
+                    className={`${input} block w-full text-rose-400`}
+                    value={form.take_profit_rate}
+                    onChange={(e) => setForm({ ...form, take_profit_rate: e.target.value })}
+                  />
+                  <p className="mt-1 font-mono text-[11px] text-zinc-500">
+                    익절 +{(Number(form.take_profit_rate || 0) * 100).toFixed(1)}%
+                  </p>
+                </div>
+              </div>
+              <label className="mt-3 flex items-center gap-2 text-xs text-zinc-300 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={form.exclude_major_coins}
+                  onChange={(e) => setForm({ ...form, exclude_major_coins: e.target.checked })}
+                  className="rounded border-zinc-700 bg-zinc-900"
+                />
+                <span>메이저 저변동성 코인 제외 (BTC·ETH·XRP·SOL·DOGE·ADA 등)</span>
+              </label>
             </div>
 
             <div className="flex flex-col justify-end">

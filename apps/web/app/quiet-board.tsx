@@ -109,6 +109,13 @@ export default function QuietBoard({
                     <p className="mt-1 font-mono text-lg font-semibold tabular-nums text-zinc-100 sm:text-xl">
                       {newest.fill_price ? `${priceText(newest.fill_price)}원` : '기록 없음'}
                     </p>
+                    {newest.best_bid ? (
+                      <p className="mt-1 font-mono text-[11px] text-emerald-400">
+                        권장 지정가: {priceText(newest.best_bid)}원 (매수1호가)
+                      </p>
+                    ) : newest.fill_price ? (
+                      <p className="mt-1 text-[11px] text-zinc-500">호가창 지정가 매수 권장 (슬리피지 절감)</p>
+                    ) : null}
                   </div>
                   <div>
                     <p className="text-xs text-zinc-400">현재 시장가</p>

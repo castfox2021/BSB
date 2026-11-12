@@ -56,6 +56,7 @@ class Settings(BaseModel):
     costs_confirmed: bool = False
     sound_enabled: bool = False
     browser_alerts_enabled: bool = False
+    exclude_major_coins: bool = False
 
     @model_validator(mode="after")
     def validate_policy(self):
@@ -611,8 +612,8 @@ def create_app(
             at = datetime.now(UTC).isoformat()
             for key, value in updated.items():
                 conn.execute(
-                    "UPDATE settings SET value=?,updated_at=? WHERE key=?",
-                    (json.dumps(value), at, key),
+                    "INSERT OR REPLACE INTO settings (key, value, updated_at) VALUES (?,?,?)",
+                    (key, json.dumps(value), at),
                 )
             store.audit(conn, "settings_changed", {"before": before, "after": updated})
         return updated

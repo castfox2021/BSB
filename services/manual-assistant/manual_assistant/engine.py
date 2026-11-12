@@ -12,6 +12,16 @@ from .strategy import entry
 
 D = Decimal
 logger = logging.getLogger("bsb.manual.engine")
+MAJOR_COINS = frozenset({
+    "KRW-BTC",
+    "KRW-ETH",
+    "KRW-XRP",
+    "KRW-SOL",
+    "KRW-DOGE",
+    "KRW-ADA",
+    "KRW-USDT",
+    "KRW-USDC",
+})
 
 
 def sweep(
@@ -224,13 +234,21 @@ class Engine:
             row = conn.execute(
                 "SELECT * FROM paper_accounts WHERE version_id=?", (version["id"],)
             ).fetchone()
-        initial_cap = self.store.settings().get("initial_capital_krw", "150000")
+        params = version["params"]
+        policy = self.store.settings()
+        initial_cap = policy.get("initial_capital_krw", "150000")
+        stop_loss_rate = D(policy.get("stop_loss_rate", params["stop_loss"]))
+        take_profit_rate = D(policy.get("take_profit_rate", params["take_profit"]))
+        exclude_majors = bool(policy.get("exclude_major_coins", False))
+        max_entry = D(policy.get("max_entry_krw", "50000"))
+        min_reserve = D(policy.get("minimum_cash_reserve_krw", "50000"))
+        daily_limit = D(policy.get("daily_loss_alert_krw", "3000"))
+        max_pos = int(policy.get("max_positions", 2))
         cash = D(row["cash"]) if row else D(initial_cap)
         realized = D(row["realized"]) if row else D(0)
         state = json.loads(row["position"]) if row else {"holdings": {}, "seen": {}}
         holdings = state["holdings"]
         changed = row is None
-        params = version["params"]
         pending_trades = []
         diagnostic = {
             "checked_at": datetime.now(UTC).isoformat(),
@@ -270,7 +288,7 @@ class Engine:
                     changed = True
 
                 trail_active = bool(pos.get("trail_active", False))
-                target_rate = D(params["take_profit"])
+                target_rate = take_profit_rate
                 trailing_drop = D(params.get("trailing_drop", "0.008"))
 
                 if peak >= avg * (1 + target_rate) and not trail_active:
@@ -279,7 +297,7 @@ class Engine:
                     changed = True
 
                 reason = None
-                if not trail_active and bid <= avg * (1 - D(params["stop_loss"])):
+                if not trail_active and bid <= avg * (1 - stop_loss_rate):
                     reason = "stop"
                 elif trail_active and bid <= peak * (1 - trailing_drop):
                     reason = "target"
@@ -308,7 +326,7 @@ class Engine:
                             "fill_price": decimal_text(proceeds / (qty * D("0.9996"))),
                             "signal_at": datetime.now(UTC).isoformat(),
                             "reason_summary": {
-                                "stop": f"손절 기준 도달 (진입가 대비 -{decimal_text(D(params['stop_loss']) * 100)}%)",
+                                "stop": f"손절 기준 도달 (진입가 대비 -{decimal_text(stop_loss_rate * 100)}%)",
                                 "target": (
                                     f"트레일링 익절 청산 (고점 {decimal_text(peak)}원 대비 -{decimal_text(trailing_drop * 100)}% 꺾임)"
                                     if trail_active
@@ -345,10 +363,13 @@ class Engine:
                 continue
             state["seen"][symbol] = bars[-1]["start"]
             changed = True
+            if exclude_majors and symbol in MAJOR_COINS:
+                waiting("메이저 저변동성 코인 제외")
+                continue
             if (
-                realized <= -D("3000")
-                or len(holdings) >= 2
-                or cash - D("50000") < D("50000")
+                realized <= -daily_limit
+                or len(holdings) >= max_pos
+                or cash - max_entry < min_reserve
             ):
                 waiting("손실·보유·현금 한도")
                 continue
@@ -367,7 +388,9 @@ class Engine:
                 waiting(entry_reasons[0] if entry_reasons else "매수 조건 미충족")
             if passed:
                 signal_at = datetime.now(UTC).isoformat()
-                qty, cost = sweep(quote["asks"], budget=D("50000"))
+                qty, cost = sweep(quote["asks"], budget=max_entry)
+                best_bid = decimal_text(D(quote["bids"][0][0])) if quote.get("bids") else None
+                best_ask = decimal_text(D(quote["asks"][0][0])) if quote.get("asks") else None
                 if qty:
                     pending_trades.append(
                         {
@@ -376,6 +399,8 @@ class Engine:
                             "quantity": decimal_text(qty),
                             "cost_krw": decimal_text(cost),
                             "fill_price": decimal_text(cost / (qty * D("1.0004"))),
+                            "best_bid": best_bid,
+                            "best_ask": best_ask,
                             "signal_at": signal_at,
                             "reasons": entry_reasons,
                             "reason_summary": " · ".join(entry_reasons),
