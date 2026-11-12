@@ -5,7 +5,7 @@ export type Board={runtime?:{state:string;message:string;running:boolean;last_an
 export const signedMoney=(value:string|null|undefined)=>value==null?'—':`${Number(value)>0?'+':''}${Number(value).toLocaleString('ko-KR',{maximumFractionDigits:2})}원`;
 export const signedRate=(value:string|null|undefined)=>value==null?'—':`${Number(value)>0?'+':''}${(Number(value)*100).toFixed(2)}%`;
 export const elapsed=(seconds:number)=>seconds<60?`${seconds}초`:seconds<3600?`${Math.floor(seconds/60)}분 ${seconds%60}초`:`${Math.floor(seconds/3600)}시간 ${Math.floor(seconds%3600/60)}분`;
-export const pnlColor=(v:string|null|undefined)=>v==null?'text-slate-400':Number(v)>0?'text-red-400':Number(v)<0?'text-blue-400':'text-slate-200';
+export const pnlColor=(v:string|null|undefined)=>v==null?'text-zinc-500':Number(v)>0?'text-rose-400':Number(v)<0?'text-sky-400':'text-zinc-200';
 
 export const priceText=(v:string|null|undefined)=>v==null?'—':new Intl.NumberFormat('ko-KR',{maximumSignificantDigits:10}).format(Number(v));
 
