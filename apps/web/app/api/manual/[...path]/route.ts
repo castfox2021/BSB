@@ -2,10 +2,20 @@ const routes = new Set(['board','board/preferences','board/comparison','trading/
 type Context = {params: Promise<{path:string[]}>};
 async function forward(request: Request, context: Context) {
  const incoming = new URL(request.url);
- if (!['localhost','127.0.0.1'].includes(incoming.hostname)) return Response.json({error:'local access only'},{status:403});
- const host=request.headers.get('host')??incoming.host;
- if(!/^(localhost|127\.0\.0\.1)(:[0-9]{1,5})?$/.test(host)) return Response.json({error:'local host required'},{status:403});
- const browserOrigin=`http://${host}`;
+ const allowedHosts = new Set([
+  'localhost',
+  '127.0.0.1',
+  'careerbook.kr',
+  'www.careerbook.kr',
+  ...(process.env.BSB_ALLOWED_HOSTS?.split(',').map(h=>h.trim().toLowerCase())??[])
+ ]);
+ const rawHost = (request.headers.get('host') ?? incoming.host).split(':')[0].toLowerCase();
+ if (!allowedHosts.has(incoming.hostname.toLowerCase()) && !allowedHosts.has(rawHost)) {
+  return Response.json({error:'host access denied'},{status:403});
+ }
+ const proto = request.headers.get('x-forwarded-proto') ?? (incoming.protocol.replace(':','') || 'http');
+ const host = request.headers.get('host') ?? incoming.host;
+ const browserOrigin = `${proto}://${host}`;
  const path = (await context.params).path.join('/');
  const reviewRead = /^board\/trades\/[a-f0-9]{64}$/.test(path) || /^trading\/positions\/[a-f0-9]{24}\/(replay|reasoning|reviews)$/.test(path);
  const reviewWrite = (request.method==='PATCH' && /^trading\/positions\/[a-f0-9]{24}\/journal$/.test(path)) || (request.method==='POST' && /^trading\/positions\/[a-f0-9]{24}\/review$/.test(path));

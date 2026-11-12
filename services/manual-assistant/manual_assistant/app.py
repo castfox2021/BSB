@@ -121,14 +121,16 @@ def create_app(
         os.getenv("BSB_MANUAL_DB", decimal_text(ROOT / "data/manual-assistant.sqlite3"))
     )
     allowed = origins or os.getenv(
-        "BSB_MANUAL_ORIGINS", "http://127.0.0.1:13000,http://localhost:13000"
+        "BSB_MANUAL_ORIGINS", "http://127.0.0.1:13000,http://localhost:13000,https://careerbook.kr,http://careerbook.kr"
     ).split(",")
+    extra_hosts = [h.strip() for h in os.getenv("BSB_ALLOWED_HOSTS", "").split(",") if h.strip()]
+    trusted_hosts = {"127.0.0.1", "localhost", "careerbook.kr", "www.careerbook.kr", *extra_hosts}
     if any(
-        urlparse(origin).hostname not in ("127.0.0.1", "localhost")
-        or urlparse(origin).scheme != "http"
+        urlparse(origin).hostname not in trusted_hosts
+        or urlparse(origin).scheme not in ("http", "https")
         for origin in allowed
     ):
-        raise ValueError("only local HTTP origins are allowed")
+        raise ValueError("only local or trusted origins are allowed")
     store = Storage(path)
     jobs: set[asyncio.Task] = set()
     semaphore = asyncio.Semaphore(1)
