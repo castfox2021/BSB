@@ -2,7 +2,22 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 
-ROOT = Path(os.getenv('BSB_PROJECT_ROOT', str(Path(__file__).resolve().parents[4])))
+
+def _resolve_project_root() -> Path:
+    if env_root := os.getenv('BSB_PROJECT_ROOT'):
+        return Path(env_root).resolve()
+    cur = Path(__file__).resolve()
+    for parent in [cur, *cur.parents]:
+        if (parent / 'packages/contracts/market-trade.schema.json').exists():
+            return parent
+    cwd = Path.cwd().resolve()
+    for parent in [cwd, *cwd.parents]:
+        if (parent / 'packages/contracts/market-trade.schema.json').exists():
+            return parent
+    return cur.parents[4] if len(cur.parents) > 4 else cur.parent
+
+
+ROOT = _resolve_project_root()
 
 
 @dataclass(frozen=True)
