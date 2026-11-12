@@ -9,7 +9,9 @@ if(![apiPort,webPort].every(p=>/^\d+$/.test(p)&&Number(p)>=1024&&Number(p)<=6553
 const env={...process.env,NEXT_TELEMETRY_DISABLED:'1',MANUAL_API_URL:`http://127.0.0.1:${apiPort}`,NEXT_PUBLIC_MANUAL_API_PORT:apiPort,BSB_MANUAL_ORIGINS:process.env.BSB_MANUAL_ORIGINS ?? `http://127.0.0.1:${webPort},http://localhost:${webPort},https://careerbook.kr,http://careerbook.kr`};
 const browserEnv={...env};
 for(const key of Object.keys(browserEnv)) if(/BITHUMB|SECRET|ACCESS_KEY|AUTHORIZATION/i.test(key)) delete browserEnv[key];
-const children=[spawn(python,['-m','uvicorn','manual_assistant.app:app','--host','127.0.0.1','--port',apiPort,'--no-access-log'],{cwd:root,env,stdio:'inherit',detached:true}),spawn('npm',['run','dev','-w','@bsb/web','--','--hostname',webHost,'--port',webPort],{cwd:root,env:browserEnv,stdio:'inherit',detached:true})];
+const isProd=process.env.NODE_ENV==='production'||existsSync(resolve(root,'apps/web/.next/BUILD_ID'));
+const webScript=isProd?'start':'dev';
+const children=[spawn(python,['-m','uvicorn','manual_assistant.app:app','--host','127.0.0.1','--port',apiPort,'--no-access-log'],{cwd:root,env,stdio:'inherit',detached:true}),spawn('npm',['run',webScript,'-w','@bsb/web','--','--hostname',webHost,'--port',webPort],{cwd:root,env:browserEnv,stdio:'inherit',detached:true})];
 let stopping=false;
 function stop(code=0){
  if(stopping)return;stopping=true;
