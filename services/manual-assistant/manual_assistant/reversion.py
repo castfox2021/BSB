@@ -4,12 +4,14 @@ import hashlib
 import json
 import logging
 import time
+import uuid
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal as D
 from decimal import localcontext
 
+from .exit_engine import evaluate_exit_step
 from .ledger import decimal_text
-from .reversion_schema import POLICIES
+from .reversion_schema import DEFAULT_EXIT_POLICY, POLICIES
 
 PRIMARY = "structure_trailing"
 logger = logging.getLogger("bsb.manual.reversion")
@@ -110,6 +112,58 @@ class ReversionLab:
                 )
             )
         return sum(values) / len(values)
+
+    def exit_policy(self):
+        with self.store.connect() as conn:
+            row = conn.execute(
+                "SELECT value FROM strategy_state WHERE key='exit_policy_config'"
+            ).fetchone()
+            return {**DEFAULT_EXIT_POLICY, **(json.loads(row[0]) if row else {})}
+
+    def update_exit_policy(self, patch: dict):
+        current = self.exit_policy()
+        merged = {**current, **patch}
+        tp1_pct = D(str(merged["tp1_pct"]))
+        tp2_pct = D(str(merged["tp2_pct"]))
+        tp1_frac = D(str(merged["tp1_fraction"]))
+        tp2_frac = D(str(merged["tp2_fraction"]))
+        trail_pct = D(str(merged["trailing_drawdown_pct"]))
+        max_stop = D(str(merged["maximum_stop_rate"]))
+        min_krw = D(str(merged["min_order_krw"]))
+        if tp1_pct <= 0 or tp2_pct <= tp1_pct or tp2_pct > D("0.5"):
+            raise ValueError("TP1 < TP2 범위가 올바르지 않습니다.")
+        if tp1_frac <= 0 or tp2_frac <= 0 or tp1_frac + tp2_frac >= D("1"):
+            raise ValueError("TP1 + TP2 매도 비율 합계는 100% 미만이어야 합니다.")
+        if trail_pct <= 0 or trail_pct > D("0.2") or max_stop <= 0 or max_stop > D("0.1"):
+            raise ValueError("트레일링 또는 최대 손절 한도 범위가 올바르지 않습니다.")
+        if min_krw < D("500"):
+            raise ValueError("최소 주문 금액이 너무 작습니다.")
+        merged["policy_version"] = int(current.get("policy_version", 1)) + 1
+        merged["mode"] = "PAPER"  # LIVE mode requires explicit approval gate.
+        with self.store.connect() as conn:
+            conn.execute(
+                "INSERT OR REPLACE INTO strategy_state VALUES('exit_policy_config',?)",
+                (json.dumps(merged),),
+            )
+        return merged
+
+    def _record_exit_event(
+        self, conn, position_id, event_type, market_price, state_before, state_after, reason, metadata=None
+    ):
+        conn.execute(
+            "INSERT INTO position_exit_event VALUES (?,?,?,?,?,?,?,?,?)",
+            (
+                uuid.uuid4().hex,
+                position_id,
+                event_type,
+                decimal_text(market_price),
+                state_before,
+                state_after,
+                reason,
+                json.dumps(metadata or {}),
+                datetime.now(UTC).isoformat(),
+            ),
+        )
 
     def _paper_trade(self, conn, position, side, **extra):
         at = datetime.now(UTC).isoformat()
@@ -245,6 +299,43 @@ class ReversionLab:
                     reasons=reasons_list,
                     basis=bars[-40:],
                 )
+                if policy == "partial_tp_trailing":
+                    ep_row = conn.execute(
+                        "SELECT value FROM strategy_state WHERE key='exit_policy_config'"
+                    ).fetchone()
+                    ep = {**DEFAULT_EXIT_POLICY, **(json.loads(ep_row[0]) if ep_row else {})}
+                    conn.execute(
+                        "INSERT OR IGNORE INTO position_exit_policy VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                        (
+                            identifier,
+                            int(ep.get("policy_version", 1)),
+                            decimal_text(entry),
+                            decimal_text(qty),
+                            str(ep["tp1_pct"]),
+                            str(ep["tp1_fraction"]),
+                            str(ep["tp2_pct"]),
+                            str(ep["tp2_fraction"]),
+                            str(ep["trailing_drawdown_pct"]),
+                            str(ep.get("runner_activation", "AFTER_TP2")),
+                            int(bool(ep.get("break_even_after_tp1", False))),
+                            decimal_text(entry),
+                            decimal_text(stop),
+                            "OPEN",
+                            "PAPER",
+                            now,
+                            now,
+                        ),
+                    )
+                    self._record_exit_event(
+                        conn,
+                        identifier,
+                        "ENTRY_OPENED",
+                        entry,
+                        "NONE",
+                        "OPEN",
+                        "INITIAL_ENTRY",
+                        {"initial_quantity": decimal_text(qty), "initial_stop": decimal_text(stop)},
+                    )
 
     def _close(self, conn, row, quote, reason):
         quantity = D(row["quantity"])
@@ -304,7 +395,8 @@ class ReversionLab:
                 "TRAILING_STOP": "상승 추세 추적 후 트레일링 청산",
                 "REBOUND_FAILURE": "10분 내 반등 지속 실패",
                 "FIXED_TAKE_COMPARISON": "고정 +2.5% 비교 실험 청산",
-            }[reason],
+                "DUST_REMAINDER": "최소 주문 금액 미만 잔여 수량 정리",
+            }.get(reason, reason),
         )
         if row["policy"] == PRIMARY:
             until = datetime.now(UTC) + timedelta(
@@ -327,6 +419,9 @@ class ReversionLab:
                 if not quote:
                     continue
                 bid = D(quote["bids"][0][0])
+                if row["policy"] == "partial_tp_trailing":
+                    self._protect_partial(conn, row, quote, position_config, bid)
+                    continue
                 entry, peak, stop = map(
                     D, (row["entry_price"], row["peak_price"], row["current_stop"])
                 )
@@ -375,6 +470,262 @@ class ReversionLab:
                         reason = "REBOUND_FAILURE"
                 if reason:
                     self._close(conn, row, quote, reason)
+
+    def _protect_partial(self, conn, row, quote, position_config, bid):
+        pos_id = row["id"]
+        ep_row = conn.execute(
+            "SELECT * FROM position_exit_policy WHERE position_id=?", (pos_id,)
+        ).fetchone()
+        if not ep_row:
+            return
+        ep = dict(ep_row)
+        leg_rows = conn.execute(
+            "SELECT * FROM position_exit_leg WHERE position_id=?", (pos_id,)
+        ).fetchall()
+        legs = {r["leg"]: dict(r) for r in leg_rows}
+
+        entry = D(ep["entry_avg_price"])
+        elapsed = (
+            datetime.now(UTC) - datetime.fromisoformat(row["opened_at"])
+        ).total_seconds()
+        bars = self.market.book.load_contiguous(row["symbol"], limit=4)
+        rising = (
+            bid > entry
+            and len(bars) >= 3
+            and all(
+                D(b["close"]) >= D(a["close"]) for a, b in zip(bars[-3:], bars[-2:])
+            )
+        )
+        rebound_failure = elapsed >= position_config["failure_seconds"] and not rising
+
+        ep_cfg_row = conn.execute(
+            "SELECT value FROM strategy_state WHERE key='exit_policy_config'"
+        ).fetchone()
+        ep_cfg = {**DEFAULT_EXIT_POLICY, **(json.loads(ep_cfg_row[0]) if ep_cfg_row else {})}
+        min_order_krw = D(str(ep_cfg.get("min_order_krw", "5000")))
+
+        decision = evaluate_exit_step(
+            position_id=pos_id,
+            state=ep["state"],
+            entry_avg_price=entry,
+            initial_quantity=D(ep["initial_quantity"]),
+            remaining_quantity=D(row["quantity"]),
+            peak_price=D(ep["peak_price"]),
+            protective_stop_price=D(ep["protective_stop_price"]),
+            task16_stop_price=D(row["initial_stop"]),
+            latest_price=bid,
+            tp1_pct=D(ep["tp1_pct"]),
+            tp1_fraction=D(ep["tp1_fraction"]),
+            tp2_pct=D(ep["tp2_pct"]),
+            tp2_fraction=D(ep["tp2_fraction"]),
+            trailing_drawdown_pct=D(ep["trailing_drawdown_pct"]),
+            break_even_after_tp1=bool(ep["break_even_after_tp1"]),
+            min_order_krw=min_order_krw,
+            legs=legs,
+            rebound_failure_triggered=rebound_failure,
+        )
+
+        now = datetime.now(UTC).isoformat()
+        state_before = ep["state"]
+        final_state = decision.state_after
+        final_stop = decision.protective_stop_price
+
+        for ev_type, ev_reason, ev_meta in decision.events:
+            self._record_exit_event(
+                conn, pos_id, ev_type, bid, state_before, final_state, ev_reason, ev_meta
+            )
+            if ev_type == "DUST_DEFERRED":
+                leg_name = "TP1" if "TP1" in ev_reason else "TP2"
+                conn.execute(
+                    "INSERT OR IGNORE INTO position_exit_leg VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                    (
+                        uuid.uuid4().hex,
+                        pos_id,
+                        leg_name,
+                        str(ev_meta.get("target_qty", "0")),
+                        "0",
+                        None,
+                        None,
+                        f"{pos_id}:{leg_name}:DEFERRED",
+                        "DEFERRED",
+                        "0",
+                        "0",
+                        now,
+                        now,
+                    ),
+                )
+
+        current_row = dict(row)
+        for intent in decision.intents:
+            if intent.leg in ("TP1", "TP2"):
+                leg_id = uuid.uuid4().hex
+                conn.execute(
+                    "INSERT OR IGNORE INTO position_exit_leg VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                    (
+                        leg_id,
+                        pos_id,
+                        intent.leg,
+                        decimal_text(intent.target_quantity),
+                        "0",
+                        None,
+                        None,
+                        intent.client_order_id,
+                        "PENDING",
+                        "0",
+                        "0",
+                        now,
+                        now,
+                    ),
+                )
+                if not conn.execute("SELECT changes()").fetchone()[0]:
+                    continue
+                filled, proceeds = sweep(
+                    quote["bids"], quantity=intent.target_quantity, buy=False
+                )
+                if filled <= 0:
+                    continue
+                rem_qty = D(current_row["quantity"])
+                rem_cost = D(current_row["cost"])
+                cost_share = rem_cost * (filled / rem_qty)
+                partial_pnl = proceeds - cost_share
+                fill_price = proceeds / (filled * D("0.9996"))
+                fees = proceeds * D("0.0004") / D("0.9996")
+                slippage = proceeds / D("0.9996") * D("0.001") / D("0.999")
+
+                conn.execute(
+                    "UPDATE position_exit_leg SET filled_quantity=?,avg_fill_price=?,status='FILLED',realized_pnl=?,fees=?,updated_at=? WHERE client_order_id=?",
+                    (
+                        decimal_text(filled),
+                        decimal_text(fill_price),
+                        decimal_text(partial_pnl),
+                        decimal_text(fees),
+                        now,
+                        intent.client_order_id,
+                    ),
+                )
+                new_rem_qty = rem_qty - filled
+                new_rem_cost = rem_cost - cost_share
+                current_row["quantity"] = decimal_text(new_rem_qty)
+                current_row["cost"] = decimal_text(new_rem_cost)
+
+                if intent.leg == "TP1":
+                    final_state = "TP1_DONE"
+                elif intent.leg == "TP2":
+                    final_state = "RUNNER_ACTIVE"
+                    final_stop = max(
+                        final_stop,
+                        decision.peak_price * (1 - D(ep["trailing_drawdown_pct"])),
+                    )
+
+                conn.execute(
+                    "UPDATE reversion_positions SET quantity=?,cost=?,peak_price=?,current_stop=?,trail_active=? WHERE id=?",
+                    (
+                        current_row["quantity"],
+                        current_row["cost"],
+                        decimal_text(decision.peak_price),
+                        decimal_text(final_stop),
+                        int(final_state == "RUNNER_ACTIVE"),
+                        pos_id,
+                    ),
+                )
+                account = conn.execute(
+                    "SELECT * FROM reversion_accounts WHERE policy=?",
+                    (current_row["policy"],),
+                ).fetchone()
+                cash = D(account["cash"]) + proceeds
+                realized = D(account["realized"]) + partial_pnl
+                conn.execute(
+                    "UPDATE reversion_accounts SET cash=?,realized=? WHERE policy=?",
+                    (decimal_text(cash), decimal_text(realized), current_row["policy"]),
+                )
+                self._paper_trade(
+                    conn,
+                    {**current_row, "current_stop": decimal_text(final_stop)},
+                    "SELL",
+                    fill_price=decimal_text(fill_price),
+                    proceeds=decimal_text(proceeds),
+                    net_pnl=decimal_text(partial_pnl),
+                    fee_krw=decimal_text(fees),
+                    slippage_krw=decimal_text(slippage),
+                    reason=f"{intent.leg}_PARTIAL_EXIT",
+                    reason_summary=(
+                        f"TP1 +{(D(ep['tp1_pct']) * 100):.1f}% 1차 분할 익절"
+                        if intent.leg == "TP1"
+                        else f"TP2 +{(D(ep['tp2_pct']) * 100):.1f}% 2차 분할 익절 · Runner 추종 시작"
+                    ),
+                )
+                self._record_exit_event(
+                    conn,
+                    pos_id,
+                    f"{intent.leg}_FILLED",
+                    fill_price,
+                    state_before,
+                    final_state,
+                    intent.reason,
+                    {
+                        "filled_quantity": decimal_text(filled),
+                        "realized_pnl": decimal_text(partial_pnl),
+                    },
+                )
+                state_before = final_state
+            elif intent.leg in ("STOP", "RUNNER"):
+                conn.execute(
+                    "INSERT OR IGNORE INTO position_exit_leg VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                    (
+                        uuid.uuid4().hex,
+                        pos_id,
+                        intent.leg,
+                        decimal_text(intent.target_quantity),
+                        decimal_text(intent.target_quantity),
+                        decimal_text(bid),
+                        None,
+                        intent.client_order_id,
+                        "FILLED",
+                        "0",
+                        "0",
+                        now,
+                        now,
+                    ),
+                )
+                current_row["current_stop"] = decimal_text(final_stop)
+                if self._close(conn, current_row, quote, intent.reason):
+                    final_state = "CLOSED"
+                    self._record_exit_event(
+                        conn,
+                        pos_id,
+                        f"{intent.leg}_CLOSED",
+                        bid,
+                        state_before,
+                        "CLOSED",
+                        intent.reason,
+                        {"remaining_qty": current_row["quantity"]},
+                    )
+
+        if final_state == "CLOSED" and not decision.intents:
+            conn.execute(
+                "UPDATE reversion_positions SET status='CLOSED',closed_at=?,exit_price=?,net_pnl='0',exit_reason='DUST_REMAINDER' WHERE id=? AND status='OPEN'",
+                (now, decimal_text(bid), pos_id),
+            )
+
+        conn.execute(
+            "UPDATE reversion_positions SET peak_price=?,current_stop=?,trail_active=? WHERE id=? AND status='OPEN'",
+            (
+                decimal_text(decision.peak_price),
+                decimal_text(final_stop),
+                int(final_state == "RUNNER_ACTIVE"),
+                pos_id,
+            ),
+        )
+        conn.execute(
+            "UPDATE position_exit_policy SET peak_price=?,protective_stop_price=?,state=?,updated_at=? WHERE position_id=?",
+            (
+                decimal_text(decision.peak_price),
+                decimal_text(final_stop),
+                final_state,
+                now,
+                pos_id,
+            ),
+        )
 
     def tick(self):
         config = self.config()
@@ -580,4 +931,154 @@ class ReversionLab:
             "recent_results": closed[:5],
             "comparison": comparisons,
             "config": self.config(),
+            "exit_policy": self.exit_policy(),
+            "partial_positions": self._partial_positions_summary(),
         }
+
+    def _partial_positions_summary(self):
+        with self.store.connect() as conn:
+            rows = conn.execute(
+                "SELECT p.*, ep.state as exit_state, ep.initial_quantity, ep.tp1_pct, ep.tp2_pct, ep.trailing_drawdown_pct, ep.protective_stop_price, ep.peak_price as ep_peak FROM reversion_positions p JOIN position_exit_policy ep ON p.id=ep.position_id WHERE p.policy='partial_tp_trailing' AND p.status='OPEN' ORDER BY p.opened_at DESC"
+            ).fetchall()
+            result = []
+            for r in rows:
+                d = dict(r)
+                legs = [
+                    dict(l)
+                    for l in conn.execute(
+                        "SELECT leg,status,target_quantity,filled_quantity,avg_fill_price,realized_pnl,fees FROM position_exit_leg WHERE position_id=?",
+                        (d["id"],),
+                    )
+                ]
+                mkt = next((m for m in self.market.rows if m["symbol"] == d["symbol"]), None)
+                cur = mkt.get("price") if mkt else None
+                entry_p = D(d["entry_price"])
+                d["coin_name"] = self.coin_name(d["symbol"])
+                d["current_price"] = cur
+                d["return_rate"] = (
+                    decimal_text(D(cur) / entry_p - 1) if cur and entry_p > 0 else None
+                )
+                d["tp1_target"] = decimal_text(entry_p * (1 + D(d["tp1_pct"])))
+                d["tp2_target"] = decimal_text(entry_p * (1 + D(d["tp2_pct"])))
+                d["realized_partial_pnl"] = decimal_text(
+                    sum((D(l["realized_pnl"]) for l in legs), D(0))
+                )
+                d["legs"] = legs
+                result.append(d)
+            return result
+
+    def get_exit_state(self, position_id: str):
+        with self.store.connect() as conn:
+            ep = conn.execute(
+                "SELECT * FROM position_exit_policy WHERE position_id=?", (position_id,)
+            ).fetchone()
+            pos = conn.execute(
+                "SELECT * FROM reversion_positions WHERE id=?", (position_id,)
+            ).fetchone()
+            if not ep or not pos:
+                return None
+            legs = [
+                dict(r)
+                for r in conn.execute(
+                    "SELECT * FROM position_exit_leg WHERE position_id=? ORDER BY created_at",
+                    (position_id,),
+                )
+            ]
+        ep_d = dict(ep)
+        pos_d = dict(pos)
+        entry_p = D(ep_d["entry_avg_price"])
+        return {
+            "position_id": position_id,
+            "symbol": pos_d["symbol"],
+            "coin_name": self.coin_name(pos_d["symbol"]),
+            "state": ep_d["state"],
+            "mode": ep_d["mode"],
+            "entry_avg_price": ep_d["entry_avg_price"],
+            "initial_quantity": ep_d["initial_quantity"],
+            "remaining_quantity": pos_d["quantity"],
+            "peak_price": ep_d["peak_price"],
+            "protective_stop_price": ep_d["protective_stop_price"],
+            "tp1_target": decimal_text(entry_p * (1 + D(ep_d["tp1_pct"]))),
+            "tp2_target": decimal_text(entry_p * (1 + D(ep_d["tp2_pct"]))),
+            "legs": legs,
+        }
+
+    def get_exit_events(self, position_id: str | None = None, limit: int = 50):
+        with self.store.connect() as conn:
+            if position_id:
+                rows = conn.execute(
+                    "SELECT * FROM position_exit_event WHERE position_id=? ORDER BY created_at DESC LIMIT ?",
+                    (position_id, limit),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    "SELECT * FROM position_exit_event ORDER BY created_at DESC LIMIT ?",
+                    (limit,),
+                ).fetchall()
+        return [
+            {**dict(r), "metadata": json.loads(r["metadata_json"])} for r in rows
+        ]
+
+    def get_exit_comparison(self):
+        with self.store.connect() as conn:
+            accounts = {
+                r["policy"]: dict(r)
+                for r in conn.execute("SELECT * FROM reversion_accounts")
+            }
+            closed_rows = [
+                dict(r)
+                for r in conn.execute(
+                    "SELECT * FROM reversion_positions WHERE status='CLOSED'"
+                )
+            ]
+            leg_rows = [
+                dict(r)
+                for r in conn.execute("SELECT position_id,leg,status,realized_pnl FROM position_exit_leg")
+            ]
+        tp1_hits = sum(1 for l in leg_rows if l["leg"] == "TP1" and l["status"] == "FILLED")
+        tp2_hits = sum(1 for l in leg_rows if l["leg"] == "TP2" and l["status"] == "FILLED")
+        runner_reasons = {}
+        for p in closed_rows:
+            if p["policy"] == "partial_tp_trailing":
+                r = p.get("exit_reason") or "UNKNOWN"
+                runner_reasons[r] = runner_reasons.get(r, 0) + 1
+        out = []
+        for pol in POLICIES:
+            acc = accounts.get(pol, {})
+            trades = [p for p in closed_rows if p["policy"] == pol]
+            wins = [D(p["net_pnl"]) for p in trades if D(p["net_pnl"]) > 0]
+            losses = [D(p["net_pnl"]) for p in trades if D(p["net_pnl"]) < 0]
+            gross_win = sum(wins, D(0))
+            gross_loss = abs(sum(losses, D(0)))
+            pf = decimal_text(gross_win / gross_loss) if gross_loss > 0 else None
+            holds = [
+                (
+                    datetime.fromisoformat(p["closed_at"])
+                    - datetime.fromisoformat(p["opened_at"])
+                ).total_seconds()
+                for p in trades
+                if p.get("closed_at") and p.get("opened_at")
+            ]
+            item = {
+                "policy": pol,
+                "trades": len(trades),
+                "realized": acc.get("realized", "0"),
+                "max_drawdown": acc.get("max_drawdown", "0"),
+                "win_rate": decimal_text(D(len(wins)) / len(trades)) if trades else None,
+                "profit_factor": pf,
+                "avg_hold_seconds": round(sum(holds) / len(holds), 1) if holds else None,
+            }
+            if pol == "partial_tp_trailing":
+                total_started = len(trades) + sum(
+                    1
+                    for _ in self._partial_positions_summary()
+                )
+                item["tp1_reach_rate"] = (
+                    decimal_text(D(tp1_hits) / total_started) if total_started else None
+                )
+                item["tp2_reach_rate"] = (
+                    decimal_text(D(tp2_hits) / total_started) if total_started else None
+                )
+                item["runner_exit_reasons"] = runner_reasons
+            out.append(item)
+        return {"policies": out}

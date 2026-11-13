@@ -20,6 +20,27 @@ export type ReversionPosition = {
 
 export type WatchingItem = { symbol: string; coin_name?: string; low: string; drops: string[]; base_bars?: number };
 
+export type PartialLeg = {
+  leg: string;
+  status: string;
+  target_quantity: string;
+  filled_quantity: string;
+  avg_fill_price: string | null;
+  realized_pnl: string;
+  fees: string;
+};
+
+export type PartialPosition = ReversionPosition & {
+  exit_state: string;
+  initial_quantity: string;
+  quantity: string;
+  tp1_target: string;
+  tp2_target: string;
+  protective_stop_price: string;
+  realized_partial_pnl: string;
+  legs: PartialLeg[];
+};
+
 export type Reversion = {
   paper_only: true;
   live_execution: false;
@@ -30,6 +51,8 @@ export type Reversion = {
   recent_results: ReversionPosition[];
   comparison: { policy: string; trades: number; win_rate: string | null; realized: string; max_drawdown: string }[];
   config: Record<string, string | number | boolean>;
+  exit_policy?: Record<string, string | number | boolean>;
+  partial_positions?: PartialPosition[];
 };
 
 const names: Record<string, string> = {
@@ -37,6 +60,7 @@ const names: Record<string, string> = {
   fixed_trailing: '고정손절+트레일링',
   atr_trailing: 'ATR+트레일링',
   structure_fixed_take: '구조+고정익절 비교',
+  partial_tp_trailing: '분할 익절+트레일링 (Task 17)',
 };
 
 const reasons: Record<string, string> = {
@@ -220,6 +244,51 @@ export default function ReversionPanel({ data }: { data?: Reversion | null }) {
                     <span>
                       매도 {p.closed_at ? kst(p.closed_at) : '—'} ({p.exit_price ? `${priceText(p.exit_price)}원` : '—'})
                     </span>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* 분할 익절 · 동적 트레일링 (Task 17) */}
+      {data.partial_positions && data.partial_positions.length > 0 && (
+        <div className="mt-4 rounded-lg border border-[#1E2536] bg-[#0E1119] p-4 text-xs">
+          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[#1E2536]/80 pb-2.5">
+            <span className="font-semibold text-zinc-200">분할 익절 · 동적 트레일링 진행 중</span>
+            <span className="font-mono text-[11px] text-zinc-400">
+              TP1 +{(Number(data.exit_policy?.tp1_pct ?? 0.012) * 100).toFixed(1)}% (25%) · TP2 +
+              {(Number(data.exit_policy?.tp2_pct ?? 0.025) * 100).toFixed(1)}% (25%) · Runner -
+              {(Number(data.exit_policy?.trailing_drawdown_pct ?? 0.01) * 100).toFixed(1)}%
+            </span>
+          </div>
+          <div className="mt-3 space-y-2.5">
+            {data.partial_positions.map((pp) => {
+              const tp1Done = pp.legs.some((l) => l.leg === 'TP1' && l.status === 'FILLED');
+              const tp2Done = pp.legs.some((l) => l.leg === 'TP2' && l.status === 'FILLED');
+              return (
+                <div key={pp.id} className="rounded-md border border-[#1E2536]/80 bg-[#121620] p-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div className="flex items-center gap-2">
+                      <strong className="text-sm font-semibold text-zinc-100">{coinLabel(pp.coin_name, pp.symbol)}</strong>
+                      <span className="rounded border border-emerald-500/30 bg-emerald-500/10 px-2 py-0.5 font-mono text-[11px] text-emerald-300">
+                        {pp.exit_state}
+                      </span>
+                    </div>
+                    <span className={`font-mono font-semibold tabular-nums ${pnlColor(pp.realized_partial_pnl)}`}>
+                      부분 실현 {signedMoney(pp.realized_partial_pnl)}
+                    </span>
+                  </div>
+                  <div className="mt-2 grid grid-cols-2 gap-2 font-mono text-[11px] tabular-nums text-zinc-400 sm:grid-cols-4">
+                    <div>
+                      TP1: {priceText(pp.tp1_target)}원 {tp1Done ? '✓' : '대기'}
+                    </div>
+                    <div>
+                      TP2: {priceText(pp.tp2_target)}원 {tp2Done ? '✓' : '대기'}
+                    </div>
+                    <div>최고가: {priceText(pp.peak_price)}원</div>
+                    <div>보호선: {priceText(pp.protective_stop_price)}원</div>
                   </div>
                 </div>
               );

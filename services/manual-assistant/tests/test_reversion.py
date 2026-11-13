@@ -70,7 +70,7 @@ def test_schema_is_paper_only_and_entry_persists_all_comparison_policies(tmp_pat
     with store.connect() as conn:
         assert conn.execute("PRAGMA user_version").fetchone()[0] == 10
         rows = conn.execute("SELECT * FROM reversion_positions").fetchall()
-        assert len(rows) == 4
+        assert len(rows) == 5
         assert all(D(row["current_stop"]) >= D(row["entry_price"]) * D("0.985") for row in rows)
         config = json.loads(
             conn.execute("SELECT value FROM strategy_state WHERE key='reversion_config'").fetchone()[0]
@@ -117,7 +117,7 @@ def test_ten_minute_failure_does_not_close_a_rising_position(tmp_path):
     with store.connect() as conn:
         assert conn.execute(
             "SELECT count(*) FROM reversion_positions WHERE status='OPEN'"
-        ).fetchone()[0] == 4
+        ).fetchone()[0] == 5
 
 
 def test_rebound_failure_and_fixed_take_comparison_are_recorded(tmp_path):
@@ -131,7 +131,7 @@ def test_rebound_failure_and_fixed_take_comparison_are_recorded(tmp_path):
     with store.connect() as conn:
         assert conn.execute(
             "SELECT count(*) FROM reversion_positions WHERE exit_reason='REBOUND_FAILURE'"
-        ).fetchone()[0] == 4
+        ).fetchone()[0] == 5
 
     store2, market2, lab2 = setup(tmp_path / "second")
     config2 = enter(lab2, market2)
@@ -227,6 +227,6 @@ def test_drop_base_rebound_requires_consolidation_before_entry(tmp_path):
         rows = conn.execute(
             "SELECT * FROM reversion_positions WHERE status='OPEN'"
         ).fetchall()
-        assert len(rows) == 4
+        assert len(rows) == 5
         # Verify structure low is at or below the base low
         assert all(D(r["structure_low"]) <= D("90") for r in rows)

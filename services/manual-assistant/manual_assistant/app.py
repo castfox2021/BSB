@@ -1088,6 +1088,37 @@ def create_app(
             store.audit(conn, "user_paused_live_signals", {})
         return {"active_version": None}
 
+    @app.get("/api/trading/exit-policy")
+    def get_exit_policy():
+        return engine().reversion.exit_policy()
+
+    @app.put("/api/trading/exit-policy")
+    async def put_exit_policy(request: Request):
+        data = await body(request)
+        try:
+            return engine().reversion.update_exit_policy(data)
+        except ValueError as error:
+            raise HTTPException(status_code=400, detail=str(error)) from error
+
+    @app.get("/api/trading/positions/{position_id}/exit-state")
+    def get_position_exit_state(position_id: str):
+        state = engine().reversion.get_exit_state(position_id)
+        if not state:
+            raise HTTPException(status_code=404, detail="포지션을 찾을 수 없습니다.")
+        return state
+
+    @app.get("/api/trading/exit-events")
+    def get_exit_events(positionId: str | None = None, limit: int = 50):
+        return {
+            "items": engine().reversion.get_exit_events(
+                position_id=positionId, limit=max(1, min(limit, 200))
+            )
+        }
+
+    @app.get("/api/trading/exit-comparison")
+    def get_exit_comparison():
+        return engine().reversion.get_exit_comparison()
+
     @app.websocket("/ws/stream")
     async def stream(ws: WebSocket):
         if ws.headers.get("origin") not in allowed or ws.headers.get("host", "").split(
