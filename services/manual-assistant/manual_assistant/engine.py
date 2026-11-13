@@ -663,14 +663,15 @@ class Engine:
             rev_pending.clear()
         if not pending:
             return
-        with self.store.connect() as conn:
-            policy = self.store.get_json(conn, "policy", {})
-            control = self.store.get_json(conn, "trading_control", {"state": "NORMAL"})
-            follow_version = self.store.get_json(conn, "follow_version", "pullback")
-            private_accounts = self.store.get_json(conn, "private_accounts", [])
+        policy = self.store.settings()
         if not policy.get("auto_buy_only"):
             return
-        if control.get("state") == "EMERGENCY_STOP":
+        with self.store.connect() as conn:
+            ctrl_row = conn.execute("SELECT state FROM trading_control WHERE id=1").fetchone()
+            control_state = ctrl_row[0] if ctrl_row else "STOPPED"
+            qb_row = conn.execute("SELECT value FROM strategy_state WHERE key='quiet_board'").fetchone()
+            follow_version = json.loads(qb_row[0]).get("follow_version") if qb_row else None
+        if control_state == "EMERGENCY_STOP":
             return
         client = getattr(self.private_sync, "client", None)
         if not client or not getattr(client, "configured", False):
@@ -681,6 +682,7 @@ class Engine:
         budget = D(str(policy.get("max_entry_krw") or "150000"))
         if budget <= 0:
             return
+        private_accounts = self.private_sync.rows("private_accounts") if self.private_sync else []
         held_currencies = {
             str(item.get("currency", "")).upper()
             for item in private_accounts
