@@ -20,7 +20,7 @@ from fastapi import (
     WebSocketDisconnect,
 )
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, ConfigDict, model_validator
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
@@ -164,6 +164,13 @@ def create_app(
         engine.private_guard = private.guard
         engine.private_sync = private
         app.state.private = private
+        from .strategy_report import StrategyReportBuilder
+
+        report_builder = StrategyReportBuilder(
+            store,
+            (database_path.parent / "reports") if database_path else (ROOT / "data/reports"),
+        )
+        app.state.report_builder = report_builder
         app.state.orders = ManualOrders(store, market, private, engine)
         private.orders = app.state.orders
         app.state.orders.live_execution_disabled = True
@@ -1117,6 +1124,46 @@ def create_app(
 
     @app.get("/api/trading/exit-comparison")
     def get_exit_comparison():
+        return engine().reversion.get_exit_comparison()
+
+    @app.post("/api/admin/strategy-reports/preview")
+    async def preview_strategy_report(request: Request):
+        data = await body(request)
+        return app.state.report_builder.preview(data)
+
+    @app.post("/api/admin/strategy-reports")
+    async def create_strategy_report(request: Request):
+        data = await body(request)
+        try:
+            return app.state.report_builder.create_report(data)
+        except ValueError as error:
+            raise HTTPException(status_code=400, detail=str(error)) from error
+
+    @app.get("/api/admin/strategy-reports")
+    def list_strategy_reports(limit: int = 20):
+        return {"items": app.state.report_builder.list_reports(limit=max(1, min(limit, 100)))}
+
+    @app.get("/api/admin/strategy-reports/{report_id}")
+    def get_strategy_report(report_id: str):
+        report = app.state.report_builder.get_report(report_id)
+        if not report:
+            raise HTTPException(status_code=404, detail="리포트를 찾을 수 없습니다.")
+        return report
+
+    @app.get("/api/admin/strategy-reports/{report_id}/download")
+    def download_strategy_report(report_id: str):
+        zip_path = app.state.report_builder.get_zip_path(report_id)
+        if not zip_path:
+            raise HTTPException(status_code=404, detail="만료되었거나 존재하지 않는 리포트입니다.")
+        return FileResponse(
+            path=zip_path,
+            media_type="application/zip",
+            filename=f"bsb-strategy-report-{report_id[:12]}.zip",
+        )
+
+    @app.post("/api/admin/strategy-comparisons")
+    async def compare_strategies(request: Request):
+        await body(request)
         return engine().reversion.get_exit_comparison()
 
     @app.websocket("/ws/stream")

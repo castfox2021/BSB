@@ -75,3 +75,7 @@ def migrate(conn):
     from .reversion_schema import migrate as migrate_reversion
 
     migrate_reversion(conn)
+
+    from .report_schema import migrate_reports
+
+    migrate_reports(conn)

@@ -6,6 +6,7 @@ import QuietSettings from './quiet-settings';
 import ManualFillPanel from './manual-fill-panel';
 import StrategyComparison from './strategy-comparison';
 import StrategyLab from './strategy-lab';
+import AiStrategyReport from './ai-strategy-report';
 import TradingWorkspace from './trading-review';
 import FullMarketScanner from './full-market-scanner';
 import PrivateAccount from './private-account';
@@ -293,6 +294,7 @@ export default function Home() {
 
       {tab === 'strategy' && (
         <div className="space-y-6">
+          <AiStrategyReport />
           <StrategyComparison />
           <StrategyLab />
         </div>
