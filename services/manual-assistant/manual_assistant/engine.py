@@ -665,11 +665,13 @@ class Engine:
             return
         policy = self.store.settings()
         client = getattr(self.private_sync, "client", None)
+        api_ready = bool(client and getattr(self.private_sync, "credentials", None) is not None)
         logger.warning(
-            "auto_buy processing: %s (auto_buy_only=%s, api_configured=%s, budget=%s)",
+            "auto_buy processing: %s (auto_buy_only=%s, api_configured=%s, code=%s, budget=%s)",
             [(p["symbol"], p["version_id"]) for p in pending],
             bool(policy.get("auto_buy_only")),
-            bool(client and getattr(client, "configured", False)),
+            api_ready,
+            getattr(self.private_sync, "code", None),
             policy.get("max_entry_krw"),
         )
         if not policy.get("auto_buy_only"):
@@ -683,9 +685,8 @@ class Engine:
         if control_state == "EMERGENCY_STOP":
             logger.warning("auto_buy skipped: EMERGENCY_STOP")
             return
-        client = getattr(self.private_sync, "client", None)
-        if not client or not getattr(client, "configured", False):
-            logger.warning("auto_buy skipped: bithumb API not configured (%s)", [p["symbol"] for p in pending])
+        if not api_ready:
+            logger.warning("auto_buy skipped: bithumb API not configured (%s, code=%s)", [p["symbol"] for p in pending], getattr(self.private_sync, "code", None))
             with self.store.connect() as conn:
                 self.store.audit(conn, "auto_buy_skipped", {"reason": "api_not_configured", "count": len(pending)})
             return
