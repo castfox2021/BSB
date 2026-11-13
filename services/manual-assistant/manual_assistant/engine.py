@@ -665,7 +665,7 @@ class Engine:
             return
         policy = self.store.settings()
         if not policy.get("auto_buy_only"):
-            logger.info("auto_buy skipped: auto_buy_only is False (%s)", [p["symbol"] for p in pending])
+            logger.warning("auto_buy skipped: auto_buy_only is False (%s)", [p["symbol"] for p in pending])
             return
         with self.store.connect() as conn:
             ctrl_row = conn.execute("SELECT state FROM trading_control WHERE id=1").fetchone()
@@ -700,7 +700,7 @@ class Engine:
                 max_affordable = int(available_krw / D("1.0005"))
                 order_krw = min(int(budget), max_affordable)
                 if available_krw < min_total or order_krw < int(min_total):
-                    logger.info(
+                    logger.warning(
                         "auto_buy skipped (%s): insufficient KRW (available=%s, min_total=%s)",
                         symbol,
                         available_krw,
@@ -718,7 +718,7 @@ class Engine:
                             },
                         )
                     continue
-                logger.info("auto_buy submitting market bid for %s: %s KRW", symbol, order_krw)
+                logger.warning("auto_buy submitting market bid for %s: %s KRW", symbol, order_krw)
                 result = await OrderTransport(client).submit(
                     {
                         "market": symbol,
@@ -729,7 +729,7 @@ class Engine:
                     },
                     authorize=lambda: None,
                 )
-                logger.info("auto_buy submitted for %s: uuid=%s", symbol, result.get("uuid"))
+                logger.warning("auto_buy submitted for %s: uuid=%s", symbol, result.get("uuid"))
                 with self.store.connect() as conn:
                     self.store.audit(
                         conn,
