@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+import logging
 import time
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal as D
@@ -11,6 +12,7 @@ from .ledger import decimal_text
 from .reversion_schema import POLICIES
 
 PRIMARY = "structure_trailing"
+logger = logging.getLogger("bsb.manual.reversion")
 
 
 def sweep(levels, budget=None, quantity=None, buy=True):
@@ -419,6 +421,7 @@ class ReversionLab:
                         "base_bars": 0,
                     }
                     self.pending_auto_buys.append({"symbol": symbol, "version_id": "reversion_watch"})
+                    logger.warning("reversion_watch added: %s", symbol)
                 else:
                     existing = self.watch[symbol]
                     cur_p = D(row["price"])

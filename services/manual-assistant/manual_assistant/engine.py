@@ -664,6 +664,14 @@ class Engine:
         if not pending:
             return
         policy = self.store.settings()
+        client = getattr(self.private_sync, "client", None)
+        logger.warning(
+            "auto_buy processing: %s (auto_buy_only=%s, api_configured=%s, budget=%s)",
+            [(p["symbol"], p["version_id"]) for p in pending],
+            bool(policy.get("auto_buy_only")),
+            bool(client and getattr(client, "configured", False)),
+            policy.get("max_entry_krw"),
+        )
         if not policy.get("auto_buy_only"):
             logger.warning("auto_buy skipped: auto_buy_only is False (%s)", [p["symbol"] for p in pending])
             return
@@ -699,6 +707,13 @@ class Engine:
                 min_total = D(str((chance.get("bid") or {}).get("min_total") or "5000"))
                 max_affordable = int(available_krw / D("1.0005"))
                 order_krw = min(int(budget), max_affordable)
+                logger.warning(
+                    "auto_buy chance %s: available_krw=%s, min_total=%s, order_krw=%s",
+                    symbol,
+                    available_krw,
+                    min_total,
+                    order_krw,
+                )
                 if available_krw < min_total or order_krw < int(min_total):
                     logger.warning(
                         "auto_buy skipped (%s): insufficient KRW (available=%s, min_total=%s)",
