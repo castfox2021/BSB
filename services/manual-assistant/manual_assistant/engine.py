@@ -665,6 +665,7 @@ class Engine:
             return
         policy = self.store.settings()
         if not policy.get("auto_buy_only"):
+            logger.info("auto_buy skipped: auto_buy_only is False (%s)", [p["symbol"] for p in pending])
             return
         with self.store.connect() as conn:
             ctrl_row = conn.execute("SELECT state FROM trading_control WHERE id=1").fetchone()
@@ -672,9 +673,11 @@ class Engine:
             qb_row = conn.execute("SELECT value FROM strategy_state WHERE key='quiet_board'").fetchone()
             follow_version = json.loads(qb_row[0]).get("follow_version") if qb_row else None
         if control_state == "EMERGENCY_STOP":
+            logger.warning("auto_buy skipped: EMERGENCY_STOP")
             return
         client = getattr(self.private_sync, "client", None)
         if not client or not getattr(client, "configured", False):
+            logger.warning("auto_buy skipped: bithumb API not configured (%s)", [p["symbol"] for p in pending])
             with self.store.connect() as conn:
                 self.store.audit(conn, "auto_buy_skipped", {"reason": "api_not_configured", "count": len(pending)})
             return
@@ -682,12 +685,6 @@ class Engine:
         budget = D(str(policy.get("max_entry_krw") or "150000"))
         if budget <= 0:
             return
-        private_accounts = self.private_sync.rows("private_accounts") if self.private_sync else []
-        held_currencies = {
-            str(item.get("currency", "")).upper()
-            for item in private_accounts
-            if D(str(item.get("balance") or "0")) + D(str(item.get("locked") or "0")) > 0
-        }
         seen_symbols: set[str] = set()
         for item in pending:
             symbol = item["symbol"]
@@ -695,17 +692,20 @@ class Engine:
             if (version_id != "reversion_watch" and version_id != follow_version) or symbol in seen_symbols:
                 continue
             seen_symbols.add(symbol)
-            currency = symbol.replace("KRW-", "").upper()
-            if currency in held_currencies:
-                with self.store.connect() as conn:
-                    self.store.audit(conn, "auto_buy_skipped", {"symbol": symbol, "reason": "already_held"})
-                continue
             try:
                 chance = await client.get("/v1/orders/chance", {"market": symbol})
                 bid_account = chance.get("bid_account") or {}
                 available_krw = D(str(bid_account.get("balance") or "0"))
                 min_total = D(str((chance.get("bid") or {}).get("min_total") or "5000"))
-                if budget < min_total or available_krw < budget * D("1.001"):
+                max_affordable = int(available_krw / D("1.0005"))
+                order_krw = min(int(budget), max_affordable)
+                if available_krw < min_total or order_krw < int(min_total):
+                    logger.info(
+                        "auto_buy skipped (%s): insufficient KRW (available=%s, min_total=%s)",
+                        symbol,
+                        available_krw,
+                        min_total,
+                    )
                     with self.store.connect() as conn:
                         self.store.audit(
                             conn,
@@ -718,17 +718,18 @@ class Engine:
                             },
                         )
                     continue
+                logger.info("auto_buy submitting market bid for %s: %s KRW", symbol, order_krw)
                 result = await OrderTransport(client).submit(
                     {
                         "market": symbol,
                         "side": "bid",
                         "order_type": "price",
-                        "price": str(int(budget)),
+                        "price": str(order_krw),
                         "client_order_id": f"bsb-ab-{uuid.uuid4().hex[:16]}",
                     },
                     authorize=lambda: None,
                 )
-                held_currencies.add(currency)
+                logger.info("auto_buy submitted for %s: uuid=%s", symbol, result.get("uuid"))
                 with self.store.connect() as conn:
                     self.store.audit(
                         conn,
@@ -736,7 +737,7 @@ class Engine:
                         {
                             "symbol": symbol,
                             "version_id": version_id,
-                            "price": str(int(budget)),
+                            "price": str(order_krw),
                             "uuid": result.get("uuid"),
                         },
                     )
