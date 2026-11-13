@@ -43,6 +43,7 @@ class ReversionLab:
     def __init__(self, store, market):
         self.store, self.market = store, market
         self.watch = {}
+        self.pending_auto_buys = []
         self.last_scan = 0.0
         self.last_error = None
 
@@ -417,6 +418,7 @@ class ReversionLab:
                         "until": now_mono + 900,
                         "base_bars": 0,
                     }
+                    self.pending_auto_buys.append({"symbol": symbol, "version_id": "reversion_watch"})
                 else:
                     existing = self.watch[symbol]
                     cur_p = D(row["price"])

@@ -657,6 +657,10 @@ class Engine:
     async def _execute_auto_buys(self):
         pending = list(self.pending_auto_buys)
         self.pending_auto_buys.clear()
+        rev_pending = getattr(getattr(self, "reversion", None), "pending_auto_buys", None)
+        if rev_pending:
+            pending.extend(rev_pending)
+            rev_pending.clear()
         if not pending:
             return
         with self.store.connect() as conn:
@@ -686,7 +690,7 @@ class Engine:
         for item in pending:
             symbol = item["symbol"]
             version_id = item["version_id"]
-            if version_id != follow_version or symbol in seen_symbols:
+            if (version_id != "reversion_watch" and version_id != follow_version) or symbol in seen_symbols:
                 continue
             seen_symbols.add(symbol)
             currency = symbol.replace("KRW-", "").upper()
