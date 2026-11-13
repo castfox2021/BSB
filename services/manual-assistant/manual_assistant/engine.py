@@ -706,7 +706,8 @@ class Engine:
                 bid_account = chance.get("bid_account") or {}
                 available_krw = D(str(bid_account.get("balance") or "0"))
                 min_total = D(str((chance.get("bid") or {}).get("min_total") or "5000"))
-                max_affordable = int(available_krw / D("1.0005"))
+                bid_fee = max(D(str(chance.get("bid_fee") or "0.0025")), D("0.0025"))
+                max_affordable = int(available_krw / (1 + bid_fee + D("0.001")))
                 order_krw = min(int(budget), max_affordable)
                 logger.warning(
                     "auto_buy chance %s: available_krw=%s, min_total=%s, order_krw=%s",
