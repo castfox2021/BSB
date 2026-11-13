@@ -227,6 +227,9 @@ class QuietBoard:
                     (version, symbol),
                 ).fetchone()
                 entry_ids[symbol] = entry[0] if entry else None
+            open_buy_ids = {v for v in entry_ids.values() if v}
+            for item in buys["items"]:
+                item["is_closed"] = item["id"] not in open_buy_ids
 
             daily = sum(
                 (

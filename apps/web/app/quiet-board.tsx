@@ -85,6 +85,11 @@ export default function QuietBoard({
                       {coinLabel(newest)}
                     </strong>
                     <SignalState trade={newest} />
+                    {newest.is_closed && (
+                      <span className="inline-flex items-center rounded-md border border-[#2A344B] bg-[#181E2B] px-2.5 py-0.5 text-xs font-medium text-zinc-400">
+                        가상 청산 완료
+                      </span>
+                    )}
                   </div>
                   <span
                     role="button"
@@ -124,8 +129,10 @@ export default function QuietBoard({
                     </p>
                   </div>
                   <div>
-                    <p className="text-xs text-zinc-400">매수 후 변화율</p>
-                    <p className={`mt-1 font-mono text-base font-semibold tabular-nums ${pnlColor(newest.price_change_rate)}`}>
+                    <p className="text-xs text-zinc-400">
+                      {newest.is_closed ? '신호 이후 시세 변동 (보유 종료)' : '매수 후 변화율'}
+                    </p>
+                    <p className={`mt-1 font-mono text-base font-semibold tabular-nums ${newest.is_closed ? 'text-zinc-400' : pnlColor(newest.price_change_rate)}`}>
                       {signedRate(newest.price_change_rate)}
                     </p>
                   </div>
