@@ -10,7 +10,7 @@ import TradingWorkspace from './trading-review';
 import FullMarketScanner from './full-market-scanner';
 import PrivateAccount from './private-account';
 import ReversionPanel, { Reversion } from './reversion-panel';
-import { api, kst } from './trading-types';
+import { api, kst, Policy } from './trading-types';
 import { Board, PaperTrade, Holding, signedMoney, pnlColor } from './quiet-types';
 
 const menus = [
@@ -32,6 +32,13 @@ export default function Home() {
   const [trade, setTrade] = useState<PaperTrade | null>(null);
   const [symbol, setSymbol] = useState('KRW-BTC');
   const [journalTab, setJournalTab] = useState('paper');
+  const [autoBuyOnly, setAutoBuyOnly] = useState(false);
+
+  useEffect(() => {
+    api<Policy>('settings')
+      .then((p) => setAutoBuyOnly(Boolean(p.auto_buy_only)))
+      .catch(() => {});
+  }, [revision]);
 
   useEffect(() => {
     let active = true;
@@ -113,8 +120,14 @@ export default function Home() {
               <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
               가상매매
             </span>
-            <span className="rounded-md border border-[#1E2536] bg-[#121620] px-3 py-1.5 text-zinc-400">
-              API 주문 꺼짐
+            <span
+              className={`rounded-md border px-3 py-1.5 ${
+                autoBuyOnly
+                  ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300'
+                  : 'border-[#1E2536] bg-[#121620] text-zinc-400'
+              }`}
+            >
+              {autoBuyOnly ? '자동 실전매수 켜짐 (매도 수동)' : 'API 주문 꺼짐'}
             </span>
           </div>
         </div>

@@ -23,8 +23,11 @@ export default function QuietSettings({ board, onSaved }: { board: Board | null;
     stop_loss_rate: string;
     take_profit_rate: string;
     exclude_major_coins: boolean;
+    auto_buy_only: boolean;
   } | null>(null);
   const [system, setSystem] = useState<unknown>(null);
+  const [apiStatus, setApiStatus] = useState<{ configured?: boolean; connection_state?: string } | null>(null);
+  const [autoBuyMessage, setAutoBuyMessage] = useState('');
 
   useEffect(() => {
     if (board) setPrefs(board.preferences);
@@ -48,12 +51,16 @@ export default function QuietSettings({ board, onSaved }: { board: Board | null;
           stop_loss_rate: p.stop_loss_rate ?? '0.008',
           take_profit_rate: p.take_profit_rate ?? '0.012',
           exclude_major_coins: Boolean(p.exclude_major_coins ?? false),
+          auto_buy_only: Boolean(p.auto_buy_only ?? false),
         });
       })
       .catch(() => setPolicyMessage('설정을 읽을 수 없습니다.'));
     api('market/status')
       .then(setSystem)
       .catch(() => setSystem(null));
+    api<{ configured?: boolean; connection_state?: string }>('private/status')
+      .then(setApiStatus)
+      .catch(() => setApiStatus(null));
   }, []);
 
   async function savePrefs() {
@@ -110,6 +117,7 @@ export default function QuietSettings({ board, onSaved }: { board: Board | null;
         stop_loss_rate: form.stop_loss_rate,
         take_profit_rate: form.take_profit_rate,
         exclude_major_coins: form.exclude_major_coins,
+        auto_buy_only: form.auto_buy_only,
       };
       const updated = await api<Policy>('settings', 'PATCH', patch);
       setPolicy(updated);
@@ -124,20 +132,62 @@ export default function QuietSettings({ board, onSaved }: { board: Board | null;
     }
   }
 
+  async function toggleAutoBuy(next: boolean) {
+    if (!policy || !form) return;
+    setBusy(true);
+    setAutoBuyMessage('');
+    try {
+      const updated = await api<Policy>('settings', 'PATCH', {
+        ...policy,
+        auto_buy_only: next,
+      });
+      setPolicy(updated);
+      setForm({ ...form, auto_buy_only: Boolean(updated.auto_buy_only) });
+      setAutoBuyMessage(
+        updated.auto_buy_only
+          ? '자동 실전 매수를 켰습니다. (매수만 자동 실행 · 매도/손절은 수동, 자금 부족 시 가상매수로 유지)'
+          : '자동 실전 매수를 껐습니다. (가상매매 전용 모드)'
+      );
+      onSaved();
+    } catch (e) {
+      setAutoBuyMessage(e instanceof Error ? e.message : '자동 실전 매수 설정 변경 실패');
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
     <section className="space-y-6">
       {/* 1. 시스템 모드 */}
       <div className="rounded-xl border border-[#1E2536] bg-[#121620] p-6">
-        <h2 className="text-base font-semibold text-zinc-100">시스템 설정</h2>
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <h2 className="text-base font-semibold text-zinc-100">시스템 설정</h2>
+          <span
+            className={`rounded-md border px-2.5 py-1 text-xs font-medium ${
+              apiStatus?.configured
+                ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300'
+                : 'border-amber-500/30 bg-amber-500/10 text-amber-300'
+            }`}
+          >
+            {apiStatus?.configured ? '빗썸 API 키 연결됨' : '빗썸 API 키 미설정 (가상매수로만 동작)'}
+          </span>
+        </div>
         <p className="mt-2 text-xs text-zinc-400">
-          가상매매 및 수동 추종 모드입니다. 소리·팝업 알림은 비활성화되어 있으며 실제 주문은 빗썸에서 직접 실행합니다.
+          기본은 가상매매 모드입니다. 아래 옵션을 켜면 추종 전략이 매수 신호를 포착할 때만 빗썸 시장가 매수를 자동 실행합니다. 손절·익절 매도는 자동으로 실행하지 않으며, 주문 가능 원화 자금이 부족하면 가상매수로만 기록됩니다.
         </p>
-        <fieldset disabled className="mt-4 text-xs text-zinc-500">
-          <label className="inline-flex items-center gap-2">
-            <input type="checkbox" className="rounded border-zinc-700 bg-zinc-900" />
-            <span>API 실전매매 (별도 승인 필요)</span>
+        <div className="mt-4 space-y-2">
+          <label className="inline-flex cursor-pointer items-center gap-2.5 text-sm font-medium text-zinc-200">
+            <input
+              type="checkbox"
+              disabled={busy || !form}
+              checked={Boolean(form?.auto_buy_only)}
+              onChange={(e) => toggleAutoBuy(e.target.checked)}
+              className="h-4 w-4 rounded border-zinc-600 bg-zinc-900 accent-emerald-500"
+            />
+            <span>신호 포착 시 자동 실전 매수 (매수만 자동 · 매도는 수동)</span>
           </label>
-        </fieldset>
+          {autoBuyMessage && <p className="text-xs font-medium text-emerald-400">{autoBuyMessage}</p>}
+        </div>
       </div>
 
       {/* 2. 실전 운용 기준 자본금 및 주문 한도 설정 */}

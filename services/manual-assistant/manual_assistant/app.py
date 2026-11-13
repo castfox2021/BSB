@@ -57,6 +57,7 @@ class Settings(BaseModel):
     sound_enabled: bool = False
     browser_alerts_enabled: bool = False
     exclude_major_coins: bool = False
+    auto_buy_only: bool = False
 
     @model_validator(mode="after")
     def validate_policy(self):
@@ -161,6 +162,7 @@ def create_app(
         )
         engine = Engine(store, market)
         engine.private_guard = private.guard
+        engine.private_sync = private
         app.state.private = private
         app.state.orders = ManualOrders(store, market, private, engine)
         private.orders = app.state.orders

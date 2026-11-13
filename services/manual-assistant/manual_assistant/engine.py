@@ -3,6 +3,7 @@ import hashlib
 import json
 import logging
 import time
+import uuid
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal, localcontext
 
@@ -63,6 +64,8 @@ class Engine:
         self.performance_minute = None
         self.paper_entry_at = 0.0
         self.private_guard = lambda: []
+        self.private_sync = None
+        self.pending_auto_buys = []
         from .reversion import ReversionLab
 
         self.reversion = ReversionLab(store, market)
@@ -418,6 +421,7 @@ class Engine:
                             "channel": "PAPER",
                         }
                     )
+                    self.pending_auto_buys.append({"symbol": symbol, "version_id": version["id"]})
                     cash -= cost
                     entry_price = decimal_text(cost / (qty * D("1.0004")))
                     holdings[symbol] = {
@@ -650,10 +654,100 @@ class Engine:
             self.reversion.last_error = type(error).__name__
             logger.exception("paper mean-reversion evaluation paused")
 
+    async def _execute_auto_buys(self):
+        pending = list(self.pending_auto_buys)
+        self.pending_auto_buys.clear()
+        if not pending:
+            return
+        with self.store.connect() as conn:
+            policy = self.store.get_json(conn, "policy", {})
+            control = self.store.get_json(conn, "trading_control", {"state": "NORMAL"})
+            follow_version = self.store.get_json(conn, "follow_version", "pullback")
+            private_accounts = self.store.get_json(conn, "private_accounts", [])
+        if not policy.get("auto_buy_only"):
+            return
+        if control.get("state") == "EMERGENCY_STOP":
+            return
+        client = getattr(self.private_sync, "client", None)
+        if not client or not getattr(client, "configured", False):
+            with self.store.connect() as conn:
+                self.store.audit(conn, "auto_buy_skipped", {"reason": "api_not_configured", "count": len(pending)})
+            return
+        from .manual_orders import OrderTransport
+        budget = D(str(policy.get("max_entry_krw") or "150000"))
+        if budget <= 0:
+            return
+        held_currencies = {
+            str(item.get("currency", "")).upper()
+            for item in private_accounts
+            if D(str(item.get("balance") or "0")) + D(str(item.get("locked") or "0")) > 0
+        }
+        seen_symbols: set[str] = set()
+        for item in pending:
+            symbol = item["symbol"]
+            version_id = item["version_id"]
+            if version_id != follow_version or symbol in seen_symbols:
+                continue
+            seen_symbols.add(symbol)
+            currency = symbol.replace("KRW-", "").upper()
+            if currency in held_currencies:
+                with self.store.connect() as conn:
+                    self.store.audit(conn, "auto_buy_skipped", {"symbol": symbol, "reason": "already_held"})
+                continue
+            try:
+                chance = await client.get("/v1/orders/chance", {"market": symbol})
+                bid_account = chance.get("bid_account") or {}
+                available_krw = D(str(bid_account.get("balance") or "0"))
+                min_total = D(str((chance.get("bid") or {}).get("min_total") or "5000"))
+                if budget < min_total or available_krw < budget * D("1.001"):
+                    with self.store.connect() as conn:
+                        self.store.audit(
+                            conn,
+                            "auto_buy_skipped",
+                            {
+                                "symbol": symbol,
+                                "reason": "insufficient_krw",
+                                "available_krw": str(available_krw),
+                                "budget": str(budget),
+                            },
+                        )
+                    continue
+                result = await OrderTransport(client).submit(
+                    {
+                        "market": symbol,
+                        "side": "bid",
+                        "order_type": "price",
+                        "price": str(int(budget)),
+                        "client_order_id": f"bsb-ab-{uuid.uuid4().hex[:16]}",
+                    },
+                    authorize=lambda: None,
+                )
+                held_currencies.add(currency)
+                with self.store.connect() as conn:
+                    self.store.audit(
+                        conn,
+                        "auto_buy_submitted",
+                        {
+                            "symbol": symbol,
+                            "version_id": version_id,
+                            "price": str(int(budget)),
+                            "uuid": result.get("uuid"),
+                        },
+                    )
+            except Exception as error:
+                logger.exception("auto_buy_failed for %s", symbol)
+                with self.store.connect() as conn:
+                    self.store.audit(
+                        conn,
+                        "auto_buy_failed",
+                        {"symbol": symbol, "error": type(error).__name__, "detail": str(error)[:200]},
+                    )
+
     async def run(self):
         while True:
             try:
                 await asyncio.to_thread(self.tick)
+                await self._execute_auto_buys()
                 self.last_tick_at = datetime.now(UTC).isoformat()
                 self.last_error = None
             except Exception as error:
