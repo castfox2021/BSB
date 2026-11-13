@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import logging
 import time
 from datetime import UTC, datetime, timedelta
 from decimal import ROUND_DOWN, Decimal
@@ -13,6 +14,7 @@ from .private_client import BASE, ERRORS, PrivateError
 from .private_sync import identifier, now
 
 D = Decimal
+logger = logging.getLogger("bsb.manual.orders")
 OPEN = ("SUBMITTING", "ACKNOWLEDGED", "UNKNOWN")
 
 
@@ -80,6 +82,11 @@ class OrderTransport:
                 raise OrderRejected(ERRORS[code])
         if response.status_code != 201:
             # Conservatively uncertain: even HTTP errors are never retried automatically.
+            logger.warning(
+                "OrderTransport non-201 response: status=%s body=%s",
+                response.status_code,
+                response.text[:300],
+            )
             raise OrderBlocked(
                 "거래소 응답 확인 필요: 재전송하지 않고 주문 내역을 조회합니다."
             )

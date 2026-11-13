@@ -745,7 +745,8 @@ class Engine:
                     },
                     authorize=lambda: None,
                 )
-                logger.warning("auto_buy submitted for %s: uuid=%s", symbol, result.get("uuid"))
+                order_uuid = result if isinstance(result, str) else result.get("uuid")
+                logger.warning("auto_buy submitted for %s: uuid=%s", symbol, order_uuid)
                 with self.store.connect() as conn:
                     self.store.audit(
                         conn,
@@ -754,7 +755,7 @@ class Engine:
                             "symbol": symbol,
                             "version_id": version_id,
                             "price": str(order_krw),
-                            "uuid": result.get("uuid"),
+                            "uuid": order_uuid,
                         },
                     )
             except Exception as error:
