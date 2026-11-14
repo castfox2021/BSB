@@ -77,14 +77,27 @@ export default function QuietSettings({ board, onSaved }: { board: Board | null;
     }
   }
 
-  const initialCap = Number(form?.initial_capital_krw || 0);
-  const maxEntry = Number(form?.max_entry_krw || 0);
-  const minCash = Number(form?.minimum_cash_reserve_krw || 0);
-  const dailyLoss = Number(form?.daily_loss_alert_krw || 0);
-  const maxPositions = form?.max_positions || 2;
+  const cleanNum = (v: string | number | undefined) => Number(String(v ?? '0').replace(/,/g, '').trim());
+  const initialCap = cleanNum(form?.initial_capital_krw);
+  const maxEntry = cleanNum(form?.max_entry_krw);
+  const minCash = cleanNum(form?.minimum_cash_reserve_krw);
+  const dailyLoss = cleanNum(form?.daily_loss_alert_krw);
+  const maxPositions = Number(form?.max_positions || 1);
   const requiredCapital = maxEntry * maxPositions + minCash;
   const isCapitalValid =
-    initialCap > 0 && initialCap >= requiredCapital && dailyLoss < initialCap && maxPositions >= 1 && maxPositions <= 10;
+    Number.isFinite(initialCap) &&
+    Number.isFinite(maxEntry) &&
+    Number.isFinite(minCash) &&
+    Number.isFinite(dailyLoss) &&
+    initialCap > 0 &&
+    maxEntry > 0 &&
+    minCash >= 0 &&
+    dailyLoss > 0 &&
+    initialCap >= requiredCapital &&
+    dailyLoss < initialCap &&
+    maxPositions >= 1 &&
+    maxPositions <= 10;
+  const [policyIsError, setPolicyIsError] = useState(false);
 
   function autoBalance(total: number) {
     if (!form || total <= 0) return;
@@ -104,8 +117,18 @@ export default function QuietSettings({ board, onSaved }: { board: Board | null;
   }
 
   async function savePolicy() {
-    if (!form || !policy || !isCapitalValid) return;
+    if (!form || !policy) return;
+    if (!isCapitalValid) {
+      setPolicyIsError(true);
+      setPolicyMessage(
+        initialCap < requiredCapital
+          ? `필요 자본(${requiredCapital.toLocaleString('ko-KR')}원)이 총 운용 자본(${initialCap.toLocaleString('ko-KR')}원)보다 많습니다. "필요 자본에 맞추기"를 누르거나 총 운용 자본을 올려주세요.`
+          : '입력한 자본금·한도·손실 기준 값을 확인해 주세요. (0보다 큰 숫자여야 합니다)'
+      );
+      return;
+    }
     setBusy(true);
+    setPolicyIsError(false);
     try {
       const patch = {
         ...policy,
@@ -114,18 +137,19 @@ export default function QuietSettings({ board, onSaved }: { board: Board | null;
         minimum_cash_reserve_krw: String(Math.floor(minCash)),
         daily_loss_alert_krw: String(Math.floor(dailyLoss)),
         max_positions: maxPositions,
-        stop_loss_rate: form.stop_loss_rate,
-        take_profit_rate: form.take_profit_rate,
+        stop_loss_rate: String(form.stop_loss_rate).trim(),
+        take_profit_rate: String(form.take_profit_rate).trim(),
         exclude_major_coins: form.exclude_major_coins,
         auto_buy_only: form.auto_buy_only,
       };
       const updated = await api<Policy>('settings', 'PATCH', patch);
       setPolicy(updated);
       setPolicyMessage(
-        `운용 기준을 저장했습니다. (기준 자본금 ${Number(updated.initial_capital_krw).toLocaleString('ko-KR')}원 · 손절 -${(Number(updated.stop_loss_rate) * 100).toFixed(1)}%)`
+        `운용 기준을 저장했습니다. (기준 자본금 ${Number(updated.initial_capital_krw).toLocaleString('ko-KR')}원 · 1회 최대 ${Number(updated.max_entry_krw).toLocaleString('ko-KR')}원 · 손절 -${(Number(updated.stop_loss_rate) * 100).toFixed(1)}%)`
       );
       onSaved();
     } catch (e) {
+      setPolicyIsError(true);
       setPolicyMessage(e instanceof Error ? e.message : '운용 기준 저장 실패');
     } finally {
       setBusy(false);
@@ -387,19 +411,32 @@ export default function QuietSettings({ board, onSaved }: { board: Board | null;
                     ? `(여유 +${(initialCap - requiredCapital).toLocaleString()}원)`
                     : `(${(requiredCapital - initialCap).toLocaleString()}원 부족)`}
                 </p>
+                {!isCapitalValid && initialCap < requiredCapital && form && (
+                  <button
+                    type="button"
+                    className="mt-2 rounded border border-rose-400/40 bg-rose-500/15 px-2.5 py-1 text-[11px] font-medium text-rose-200 hover:bg-rose-500/25"
+                    onClick={() => setForm({ ...form, initial_capital_krw: String(Math.max(requiredCapital, dailyLoss + 1000)) })}
+                  >
+                    총 운용 자본을 {requiredCapital.toLocaleString()}원으로 자동 맞추기
+                  </button>
+                )}
               </div>
             </div>
           </div>
 
           <div className="mt-6 flex flex-wrap items-center gap-4 border-t border-[#1E2536]/60 pt-5">
             <button
-              disabled={busy || !isCapitalValid}
+              disabled={busy}
               className="rounded-lg bg-zinc-100 px-5 py-2.5 text-sm font-semibold text-zinc-950 hover:bg-white disabled:bg-zinc-800 disabled:text-zinc-500 transition"
               onClick={savePolicy}
             >
               {busy ? '저장 중...' : '운용 기준 저장'}
             </button>
-            {policyMessage && <p className="text-xs font-medium text-emerald-400">{policyMessage}</p>}
+            {policyMessage && (
+              <p className={`text-xs font-medium ${policyIsError ? 'text-rose-400' : 'text-emerald-400'}`}>
+                {policyMessage}
+              </p>
+            )}
           </div>
         </div>
       )}

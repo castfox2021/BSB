@@ -81,7 +81,11 @@ class Settings(BaseModel):
                 value = Decimal(text)
             except InvalidOperation as error:
                 raise ValueError(f"invalid decimal: {key}") from error
-            if not value.is_finite() or value <= 0 or len(getattr(self, key)) > 32:
+            if (
+                not value.is_finite()
+                or (value < 0 if key == "minimum_cash_reserve_krw" else value <= 0)
+                or len(getattr(self, key)) > 32
+            ):
                 raise ValueError(f"invalid amount: {key}")
             if key.endswith("_krw") and value != value.to_integral_value():
                 raise ValueError("KRW settings must be whole won")
