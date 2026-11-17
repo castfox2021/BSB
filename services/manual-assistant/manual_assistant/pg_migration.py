@@ -251,6 +251,35 @@ CREATE TABLE IF NOT EXISTS analytics_import_batches (
   created_at TIMESTAMPTZ NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS private_orders (
+  account_id TEXT NOT NULL,
+  order_id TEXT NOT NULL,
+  market TEXT NOT NULL,
+  side TEXT NOT NULL,
+  state TEXT NOT NULL,
+  executed_quantity NUMERIC(36, 18) NOT NULL DEFAULT 0,
+  paid_fee NUMERIC(36, 18) NOT NULL DEFAULT 0,
+  created_at TIMESTAMPTZ NOT NULL,
+  updated_at TIMESTAMPTZ NOT NULL,
+  PRIMARY KEY(account_id, order_id)
+);
+
+CREATE TABLE IF NOT EXISTS private_fills (
+  account_id TEXT NOT NULL,
+  trade_id TEXT NOT NULL,
+  order_id TEXT NOT NULL,
+  symbol TEXT NOT NULL,
+  side TEXT NOT NULL,
+  quantity NUMERIC(36, 18) NOT NULL,
+  price NUMERIC(36, 18) NOT NULL,
+  fee_krw NUMERIC(36, 18) NOT NULL DEFAULT 0,
+  fee_status TEXT,
+  filled_at TIMESTAMPTZ NOT NULL,
+  received_at TIMESTAMPTZ NOT NULL,
+  source TEXT,
+  PRIMARY KEY(account_id, trade_id)
+);
+
 CREATE TABLE IF NOT EXISTS system_events (
   id BIGSERIAL PRIMARY KEY,
   type TEXT NOT NULL,
@@ -515,6 +544,33 @@ def export_sqlite_to_pg_sql(store) -> tuple[str, dict[str, int]]:
                 ") ON CONFLICT DO NOTHING;"
             )
 
+        for table_sql, tbl_name in (
+            ("SELECT account_id, order_id, market, side, state, executed_quantity, paid_fee, created_at, updated_at FROM private_orders", "private_orders"),
+            ("SELECT account_id, trade_id, order_id, symbol, side, quantity, price, fee_krw, fee_status, filled_at, received_at, source FROM private_fills", "private_fills"),
+        ):
+            try:
+                prows = conn.execute(table_sql).fetchall()
+            except Exception:
+                prows = []
+            counts[tbl_name] = len(prows)
+            for r in prows:
+                if tbl_name == "private_orders":
+                    lines.append(
+                        "INSERT INTO private_orders (account_id, order_id, market, side, state, executed_quantity, paid_fee, created_at, updated_at) VALUES ("
+                        f"{_sql_text(r['account_id'])}, {_sql_text(r['order_id'])}, {_sql_text(r['market'])}, {_sql_text(r['side'])}, "
+                        f"{_sql_text(r['state'])}, {_sql_num(r['executed_quantity'])}, {_sql_num(r['paid_fee'])}, "
+                        f"{_sql_text(r['created_at'])}, {_sql_text(r['updated_at'])}"
+                        ") ON CONFLICT DO NOTHING;"
+                    )
+                else:
+                    lines.append(
+                        "INSERT INTO private_fills (account_id, trade_id, order_id, symbol, side, quantity, price, fee_krw, fee_status, filled_at, received_at, source) VALUES ("
+                        f"{_sql_text(r['account_id'])}, {_sql_text(r['trade_id'])}, {_sql_text(r['order_id'])}, {_sql_text(r['symbol'])}, "
+                        f"{_sql_text(r['side'])}, {_sql_num(r['quantity'])}, {_sql_num(r['price'])}, {_sql_num(r['fee_krw'])}, "
+                        f"{_sql_text(r['fee_status'])}, {_sql_text(r['filled_at'])}, {_sql_text(r['received_at'])}, {_sql_text(r['source'])}"
+                        ") ON CONFLICT DO NOTHING;"
+                    )
+
     lines.extend(["", "COMMIT;", ""])
     return "\n".join(lines), counts
 
@@ -562,6 +618,8 @@ def check_pg_connection_and_parity(store, dsn: str | None = None) -> dict:
         "trade_lot_allocations",
         "analytics_sync_jobs",
         "reversion_positions",
+        "private_orders",
+        "private_fills",
         "system_events",
     )
     try:

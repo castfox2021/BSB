@@ -30,21 +30,36 @@ class _PgCompatConn:
         self._conn = pg_conn
         self._last_changes = 0
 
-    def execute(self, sql: str, params=()):
-        q = sql.strip()
-        if q.upper() == "SELECT CHANGES()":
-            return _PgCompatCursor([(self._last_changes,)], 1)
-        pg_sql = q.replace("?", "%s")
+    @staticmethod
+    def _normalize_pg_sql(sql: str) -> str:
+        pg_sql = sql.strip().replace("?", "%s")
         if re.match(r"(?i)^INSERT\s+OR\s+IGNORE\s+INTO\s+", pg_sql):
             pg_sql = re.sub(r"(?i)^INSERT\s+OR\s+IGNORE\s+INTO\s+", "INSERT INTO ", pg_sql, count=1)
             if "ON CONFLICT" not in pg_sql.upper():
                 pg_sql = pg_sql.rstrip(";") + " ON CONFLICT DO NOTHING"
+        return pg_sql
+
+    def execute(self, sql: str, params=()):
+        q = sql.strip()
+        if q.upper() == "SELECT CHANGES()":
+            return _PgCompatCursor([(self._last_changes,)], 1)
+        pg_sql = self._normalize_pg_sql(q)
         with self._conn.cursor() as cur:
             cur.execute(pg_sql, params or ())
             self._last_changes = cur.rowcount or 0
             if cur.description is not None:
                 rows = cur.fetchall()
                 return _PgCompatCursor(rows, len(rows))
+            return _PgCompatCursor([], self._last_changes)
+
+    def executemany(self, sql: str, seq_of_params):
+        rows = list(seq_of_params)
+        if not rows:
+            return _PgCompatCursor([], 0)
+        pg_sql = self._normalize_pg_sql(sql)
+        with self._conn.cursor() as cur:
+            cur.executemany(pg_sql, rows)
+            self._last_changes = cur.rowcount or 0
             return _PgCompatCursor([], self._last_changes)
 
     def executescript(self, script: str):

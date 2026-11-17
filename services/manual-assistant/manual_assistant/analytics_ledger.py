@@ -216,6 +216,9 @@ class AnalyticsLedger:
             pos_count = 0
             alloc_count = 0
             missing_cost_count = 0
+            issue_batch: list[tuple] = []
+            pos_batch: list[tuple] = []
+            lot_batch: list[tuple] = []
 
             for (acc_id, market), m_fills in grouped.items():
                 pool_qty = D(0)
@@ -274,8 +277,7 @@ class AnalyticsLedger:
                             missing_qty = qty - pool_qty
                             incomplete = True
                             missing_cost_count += 1
-                            conn.execute(
-                                "INSERT INTO analytics_reconciliation_issues VALUES (?,?,?,?,?,?,?,?,?,?)",
+                            issue_batch.append(
                                 (
                                     uuid.uuid4().hex,
                                     acc_id,
@@ -287,7 +289,7 @@ class AnalyticsLedger:
                                     "OPEN",
                                     now_iso,
                                     None,
-                                ),
+                                )
                             )
                             # Allocate only the known pool_qty without fabricating 0-cost profit
                             alloc_qty = pool_qty
@@ -310,8 +312,7 @@ class AnalyticsLedger:
                                 int((_dt(f["filled_at"]) - _dt(opened_ref)).total_seconds()),
                             )
                             pos_id = cur_pos_id or uuid.uuid4().hex
-                            conn.execute(
-                                "INSERT INTO trade_lot_allocations VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                            lot_batch.append(
                                 (
                                     uuid.uuid4().hex,
                                     pos_id,
@@ -332,7 +333,7 @@ class AnalyticsLedger:
                                     "reversion_watch" if cur_origin == "BOT" else "manual",
                                     "18.0" if cur_origin == "BOT" else "manual",
                                     "LIVE_SELL",
-                                ),
+                                )
                             )
                             alloc_count += 1
                             pool_qty -= alloc_qty
@@ -351,12 +352,7 @@ class AnalyticsLedger:
                                 cost_basis_total = acquired_total * (
                                     (realized_total / disposed_total) if False else D(0)
                                 )
-                                conn.execute(
-                                    """INSERT INTO trade_positions
-                                    (id, account_id, market, position_source, strategy_name, strategy_version, opened_at, closed_at,
-                                     acquired_quantity, disposed_quantity, remaining_quantity, cost_basis, realized_pnl, realized_pnl_pct,
-                                     fee_total, status, calculation_version)
-                                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                                pos_batch.append(
                                     (
                                         cur_pos_id,
                                         acc_id,
@@ -375,19 +371,14 @@ class AnalyticsLedger:
                                         format(fee_total, "f"),
                                         status,
                                         CALC_VERSION,
-                                    ),
+                                    )
                                 )
                                 pos_count += 1
                                 cur_pos_id = None
                                 incomplete = False
 
                 if pool_qty > D("0.00000001") and cur_pos_id:
-                    conn.execute(
-                        """INSERT INTO trade_positions
-                        (id, account_id, market, position_source, strategy_name, strategy_version, opened_at, closed_at,
-                         acquired_quantity, disposed_quantity, remaining_quantity, cost_basis, realized_pnl, realized_pnl_pct,
-                         fee_total, status, calculation_version)
-                        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                    pos_batch.append(
                         (
                             cur_pos_id,
                             acc_id,
@@ -406,9 +397,29 @@ class AnalyticsLedger:
                             format(fee_total, "f"),
                             "OPEN",
                             CALC_VERSION,
-                        ),
+                        )
                     )
                     pos_count += 1
+
+            if issue_batch:
+                conn.executemany(
+                    "INSERT INTO analytics_reconciliation_issues VALUES (?,?,?,?,?,?,?,?,?,?)",
+                    issue_batch,
+                )
+            if pos_batch:
+                conn.executemany(
+                    """INSERT INTO trade_positions
+                    (id, account_id, market, position_source, strategy_name, strategy_version, opened_at, closed_at,
+                     acquired_quantity, disposed_quantity, remaining_quantity, cost_basis, realized_pnl, realized_pnl_pct,
+                     fee_total, status, calculation_version)
+                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                    pos_batch,
+                )
+            if lot_batch:
+                conn.executemany(
+                    "INSERT INTO trade_lot_allocations VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                    lot_batch,
+                )
         return {
             "calculation_version": CALC_VERSION,
             "positions": pos_count,

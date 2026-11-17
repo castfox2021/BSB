@@ -181,6 +181,8 @@ def test_admin_audit_logs_rbac_and_pg_migration_preview(tmp_path, monkeypatch):
         assert "NUMERIC(36, 18)" in pg.json()["ddl_preview"]
         assert "trade_lot_allocations" in pg.json()["ddl_preview"]
         assert "position_exit_policy" in pg.json()["ddl_preview"]
+        assert "private_orders" in pg.json()["ddl_preview"]
+        assert "private_fills" in pg.json()["ddl_preview"]
         pg_st = client.get("/api/admin/pg-migration/status", headers=a_h)
         assert pg_st.status_code == 200
         assert "sqlite_counts" in pg_st.json()
@@ -523,6 +525,10 @@ def test_postgres_identity_compat_adapter(tmp_path, monkeypatch):
             executed.append((sql, tuple(params)))
             self._last_sql = sql
             self.description = sql.strip().upper().startswith("SELECT")
+
+        def executemany(self, sql, seq_of_params):
+            for p in seq_of_params:
+                executed.append((sql, tuple(p)))
 
         def fetchone(self):
             if "count(*)" in self._last_sql:
