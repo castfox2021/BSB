@@ -295,7 +295,7 @@ def export_sqlite_to_pg_sql(store) -> tuple[str, dict[str, int]]:
                 "INSERT INTO users (id, email, password_hash, role, totp_secret, mfa_enabled, created_at) VALUES ("
                 f"{_sql_text(r['id'])}, {_sql_text(r['email'])}, {_sql_text(r['password_hash'])}, "
                 f"{_sql_text(r['role'])}, {_sql_text(r['totp_secret'])}, {mfa}, {_sql_text(r['created_at'])}"
-                ") ON CONFLICT (id) DO NOTHING;"
+                ") ON CONFLICT DO NOTHING;"
             )
 
         cred_rows = conn.execute(
@@ -307,7 +307,7 @@ def export_sqlite_to_pg_sql(store) -> tuple[str, dict[str, int]]:
                 "INSERT INTO user_exchange_credentials (id, user_id, exchange, label, access_key_enc, secret_key_enc, key_hint, created_at) VALUES ("
                 f"{_sql_text(r['id'])}, {_sql_text(r['user_id'])}, {_sql_text(r['exchange'])}, {_sql_text(r['label'])}, "
                 f"{_sql_text(r['access_key_enc'])}, {_sql_text(r['secret_key_enc'])}, {_sql_text(r['key_hint'])}, {_sql_text(r['created_at'])}"
-                ") ON CONFLICT (id) DO NOTHING;"
+                ") ON CONFLICT DO NOTHING;"
             )
 
         ord_rows = conn.execute(
@@ -327,7 +327,7 @@ def export_sqlite_to_pg_sql(store) -> tuple[str, dict[str, int]]:
                 f"{_sql_num(r['remaining_quantity'])}, {_sql_num(r['executed_amount'])}, {_sql_text(r['status'])}, "
                 f"{_sql_text(r['execution_origin'])}, {_sql_text(r['data_source'])}, {_sql_text(r['ordered_at'])}, "
                 f"{_sql_text(r['updated_at'])}, {_sql_jsonb(r['raw_payload'])}"
-                ") ON CONFLICT (id) DO NOTHING;"
+                ") ON CONFLICT DO NOTHING;"
             )
 
         fill_rows = conn.execute(
@@ -346,7 +346,7 @@ def export_sqlite_to_pg_sql(store) -> tuple[str, dict[str, int]]:
                 f"{_sql_num(r['fill_price'])}, {_sql_num(r['fill_quantity'])}, {_sql_num(r['fill_amount'])}, {_sql_num(r['fee_amount'])}, "
                 f"{_sql_text(r['fee_currency'])}, {_sql_num(r['fee_krw_equiv'])}, {_sql_text(r['execution_origin'])}, "
                 f"{_sql_text(r['data_source'])}, {_sql_text(r['source_hash'])}, {_sql_text(r['filled_at'])}, {_sql_jsonb(r['raw_payload'])}"
-                ") ON CONFLICT (id) DO NOTHING;"
+                ") ON CONFLICT DO NOTHING;"
             )
 
         pos_rows = conn.execute(
@@ -365,7 +365,7 @@ def export_sqlite_to_pg_sql(store) -> tuple[str, dict[str, int]]:
                 f"{_sql_num(r['acquired_quantity'])}, {_sql_num(r['disposed_quantity'])}, {_sql_num(r['remaining_quantity'])}, "
                 f"{_sql_num(r['cost_basis'])}, {_sql_num(r['realized_pnl'])}, {_sql_num(r['realized_pnl_pct'], True)}, "
                 f"{_sql_num(r['fee_total'])}, {_sql_text(r['status'])}, {_sql_text(r['calculation_version'])}"
-                ") ON CONFLICT (id) DO NOTHING;"
+                ") ON CONFLICT DO NOTHING;"
             )
 
         lot_rows = conn.execute(
@@ -384,7 +384,7 @@ def export_sqlite_to_pg_sql(store) -> tuple[str, dict[str, int]]:
                 f"{_sql_num(r['realized_pnl_pct'], True)}, {int(r['holding_seconds'] or 0)}, {_sql_text(r['opened_at'])}, "
                 f"{_sql_text(r['closed_at'])}, {_sql_text(r['execution_origin'])}, {_sql_text(r['strategy_name'])}, "
                 f"{_sql_text(r['strategy_version'])}, {_sql_text(r['exit_reason'])}"
-                ") ON CONFLICT (id) DO NOTHING;"
+                ") ON CONFLICT DO NOTHING;"
             )
 
         base_rows = conn.execute(
@@ -409,7 +409,7 @@ def export_sqlite_to_pg_sql(store) -> tuple[str, dict[str, int]]:
                 f"{_sql_text(r['id'])}, {_sql_text(r['policy'])}, {_sql_text(r['symbol'])}, {_sql_text(r['status'])}, "
                 f"{_sql_num(r['quantity'])}, {_sql_num(r['entry_price'])}, {_sql_num(r['cost'])}, {_sql_num(r['net_pnl'])}, "
                 f"{_sql_text(r['exit_reason'])}, {_sql_text(r['opened_at'])}, {_sql_text(r['closed_at'])}"
-                ") ON CONFLICT (id) DO NOTHING;"
+                ") ON CONFLICT DO NOTHING;"
             )
 
         ev_rows = conn.execute(
@@ -420,11 +420,53 @@ def export_sqlite_to_pg_sql(store) -> tuple[str, dict[str, int]]:
             lines.append(
                 "INSERT INTO system_events (id, type, details_json, created_at) VALUES ("
                 f"{int(r['id'])}, {_sql_text(r['type'])}, {_sql_jsonb(r['details_json'])}, {_sql_text(r['created_at'])}"
-                ") ON CONFLICT (id) DO NOTHING;"
+                ") ON CONFLICT DO NOTHING;"
             )
         if ev_rows:
             lines.append(
                 "SELECT setval(pg_get_serial_sequence('system_events', 'id'), COALESCE((SELECT MAX(id) FROM system_events), 1), true);"
+            )
+
+        for table_sql, tbl_name in (
+            ("SELECT token_hash, user_id, username, role, ip, expires_at, created_at FROM user_sessions", "user_sessions"),
+            ("SELECT token_hash, username, ip, expires_at, created_at FROM admin_sessions", "admin_sessions"),
+        ):
+            try:
+                srows = conn.execute(table_sql).fetchall()
+            except Exception:
+                srows = []
+            counts[tbl_name] = len(srows)
+            for r in srows:
+                if tbl_name == "user_sessions":
+                    lines.append(
+                        "INSERT INTO user_sessions (token_hash, user_id, username, role, ip, expires_at, created_at) VALUES ("
+                        f"{_sql_text(r['token_hash'])}, {_sql_text(r['user_id'])}, {_sql_text(r['username'])}, "
+                        f"{_sql_text(r['role'])}, {_sql_text(r['ip'])}, {_sql_text(r['expires_at'])}, {_sql_text(r['created_at'])}"
+                        ") ON CONFLICT DO NOTHING;"
+                    )
+                else:
+                    lines.append(
+                        "INSERT INTO admin_sessions (token_hash, username, ip, expires_at, created_at) VALUES ("
+                        f"{_sql_text(r['token_hash'])}, {_sql_text(r['username'])}, {_sql_text(r['ip'])}, "
+                        f"{_sql_text(r['expires_at'])}, {_sql_text(r['created_at'])}"
+                        ") ON CONFLICT DO NOTHING;"
+                    )
+
+        try:
+            job_rows = conn.execute(
+                "SELECT id, source, account_id, period_start, period_end, cursor, status, records_fetched, records_inserted, records_updated, error_message, started_at, completed_at FROM analytics_sync_jobs"
+            ).fetchall()
+        except Exception:
+            job_rows = []
+        counts["analytics_sync_jobs"] = len(job_rows)
+        for r in job_rows:
+            lines.append(
+                "INSERT INTO analytics_sync_jobs (id, source, account_id, period_start, period_end, cursor, status, records_fetched, records_inserted, records_updated, error_message, started_at, completed_at) VALUES ("
+                f"{_sql_text(r['id'])}, {_sql_text(r['source'])}, {_sql_text(r['account_id'])}, {_sql_text(r['period_start'])}, "
+                f"{_sql_text(r['period_end'])}, {_sql_text(r['cursor'])}, {_sql_text(r['status'])}, {int(r['records_fetched'] or 0)}, "
+                f"{int(r['records_inserted'] or 0)}, {int(r['records_updated'] or 0)}, {_sql_text(r['error_message'])}, "
+                f"{_sql_text(r['started_at'])}, {_sql_text(r['completed_at'])}"
+                ") ON CONFLICT DO NOTHING;"
             )
 
     lines.extend(["", "COMMIT;", ""])

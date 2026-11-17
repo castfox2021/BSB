@@ -22,8 +22,14 @@ export const quantityText=(v?:string|number|null)=>{
 };
 export async function api<T>(path:string,method='GET',body?:unknown):Promise<T>{
  const response=await fetch(`/api/manual/${path}`,{method,cache:'no-store',credentials:'same-origin',headers:{'content-type':'application/json'},body:body===undefined?undefined:JSON.stringify(body)});
- const data=await response.json();
- if(!response.ok)throw new Error(typeof(data.error??data.detail)==='string'?(data.error??data.detail):JSON.stringify(data.error??data.detail??response.status));
+ const text=await response.text();
+ let data:Record<string,unknown>={};
+ try{
+  data=text?JSON.parse(text):{};
+ }catch{
+  throw new Error(`HTTP ${response.status}: ${text.slice(0,120)||'잘못된 서버 응답'}`);
+ }
+ if(!response.ok)throw new Error(typeof(data.error??data.detail)==='string'?String(data.error??data.detail):JSON.stringify(data.error??data.detail??response.status));
  return data as T;
 }
 

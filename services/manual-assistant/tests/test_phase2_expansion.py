@@ -209,7 +209,7 @@ def test_admin_audit_logs_rbac_and_pg_migration_preview(tmp_path, monkeypatch):
         assert "BEGIN;" in pg_exp.text
         assert "INSERT INTO users" in pg_exp.text
         assert "mem@example.com" in pg_exp.text
-        assert "ON CONFLICT (id) DO NOTHING;" in pg_exp.text
+        assert "ON CONFLICT DO NOTHING;" in pg_exp.text
         assert "COMMIT;" in pg_exp.text
 
         # PG apply without DATABASE_URL returns 400
