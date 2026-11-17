@@ -82,6 +82,8 @@ const routes = new Set([
   'member/analytics',
   'member/accounts',
   'member/trades',
+  'member/export',
+  'member/password',
   'public/market/summary',
   'public/market/tickers',
   'public/exchanges/tickers',

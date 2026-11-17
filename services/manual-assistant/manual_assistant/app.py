@@ -1743,6 +1743,36 @@ def create_app(
             "page_size": safe_size,
         }
 
+    @app.get("/api/member/export")
+    def member_export(request: Request, format: str = "csv"):
+        uid, _ = _current_user(request)
+        fmt = format.strip().lower()
+        if fmt not in ("csv", "json", "xlsx"):
+            fmt = "csv"
+        content, media_type, filename = app.state.analytics_ledger.export_data(
+            fmt, {"mode": "LIVE", "period": "all", "account_id": f"member:{uid}"}
+        )
+        return Response(
+            content=content,
+            media_type=media_type,
+            headers={"Content-Disposition": f'attachment; filename="member-{filename}"'},
+        )
+
+    @app.post("/api/member/password")
+    async def member_change_password(request: Request):
+        uid, _ = _current_user(request)
+        payload = await body(request)
+        ok, err_msg = app.state.identity.change_password(
+            uid,
+            str(payload.get("current_password") or ""),
+            str(payload.get("new_password") or ""),
+        )
+        if not ok:
+            raise HTTPException(status_code=400, detail=err_msg)
+        with store.connect() as conn:
+            Storage.audit(conn, "member_password_changed", {"user_id": uid})
+        return {"changed": True}
+
     @app.get("/api/member/accounts")
     def member_accounts(request: Request):
         uid, _ = _current_user(request)

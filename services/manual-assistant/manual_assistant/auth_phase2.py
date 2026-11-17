@@ -235,6 +235,24 @@ class Phase2IdentityService:
             row = conn.execute("SELECT totp_secret FROM users WHERE id=?", (user_id,)).fetchone()
             return bool(row and row["totp_secret"] and verify_totp(row["totp_secret"], code))
 
+    def change_password(self, user_id: str, current_password: str, new_password: str) -> tuple[bool, str]:
+        if len(new_password) < 8:
+            return False, "새 비밀번호는 8자 이상이어야 합니다."
+        with self.store.connect() as conn:
+            row = conn.execute(
+                "SELECT password_hash, role FROM users WHERE id=?",
+                (user_id,),
+            ).fetchone()
+            if not row or row["password_hash"] == "admin-managed":
+                return False, "회원 계정만 비밀번호를 변경할 수 있습니다."
+            if not verify_scrypt(current_password, row["password_hash"]):
+                return False, "현재 비밀번호가 올바르지 않습니다."
+            conn.execute(
+                "UPDATE users SET password_hash=? WHERE id=?",
+                (hash_password(new_password), user_id),
+            )
+        return True, "ok"
+
     def list_credentials(self, user_id: str) -> list[dict]:
         with self.store.connect() as conn:
             rows = conn.execute(

@@ -52,6 +52,8 @@ export default function MemberDashboardPage() {
   const [secretKey, setSecretKey] = useState('');
   const [mfaSecret, setMfaSecret] = useState('');
   const [mfaCode, setMfaCode] = useState('');
+  const [curPassword, setCurPassword] = useState('');
+  const [newPassword, setNewPassword] = useState('');
   const [memberSummary, setMemberSummary] = useState<{ trade_count: number; realized_pnl_krw: string; win_rate: string | null } | null>(null);
   const [byCoin, setByCoin] = useState<CoinStat[]>([]);
   const [memberBalances, setMemberBalances] = useState<MemberBalance[]>([]);
@@ -165,6 +167,25 @@ export default function MemberDashboardPage() {
   async function logout() {
     await fetch('/api/manual/auth/logout', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
     router.push('/login');
+  }
+
+  async function changePassword(e: FormEvent) {
+    e.preventDefault();
+    setErr('');
+    setMsg('');
+    const res = await fetch('/api/manual/member/password', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ current_password: curPassword, new_password: newPassword }),
+    });
+    const d = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      setErr(d.detail || d.error || '비밀번호 변경 실패');
+      return;
+    }
+    setCurPassword('');
+    setNewPassword('');
+    setMsg('비밀번호가 변경되었습니다.');
   }
 
   let totalEvalKrw = 0;
@@ -320,9 +341,23 @@ export default function MemberDashboardPage() {
 
         {/* 내 최근 거래 내역 */}
         <section className="rounded-xl border border-[#1E2536] bg-[#121620] p-6 text-xs">
-          <div className="flex items-center justify-between">
+          <div className="flex flex-wrap items-center justify-between gap-2">
             <h2 className="text-base font-semibold">내 최근 거래 내역</h2>
-            <span className="font-mono text-[11px] text-zinc-400">최근 {memberTrades.length}건</span>
+            <div className="flex items-center gap-2 font-mono text-[11px]">
+              <span className="text-zinc-400">최근 {memberTrades.length}건</span>
+              <a
+                href="/api/manual/member/export?format=csv"
+                className="rounded border border-[#2A344B] bg-[#181E2B] px-2.5 py-1 text-zinc-200 hover:border-zinc-400"
+              >
+                CSV 내보내기
+              </a>
+              <a
+                href="/api/manual/member/export?format=json"
+                className="rounded border border-[#2A344B] bg-[#181E2B] px-2.5 py-1 text-zinc-200 hover:border-zinc-400"
+              >
+                JSON
+              </a>
+            </div>
           </div>
           {memberTrades.length === 0 ? (
             <p className="mt-3 text-zinc-500">동기화된 거래 내역이 없습니다. API 키 저장 후 &apos;내 계좌 동기화&apos;를 실행하세요.</p>
@@ -443,6 +478,34 @@ export default function MemberDashboardPage() {
               </div>
             </div>
           )}
+        </section>
+
+        {/* 비밀번호 변경 */}
+        <section className="rounded-xl border border-[#1E2536] bg-[#121620] p-6 text-xs">
+          <h2 className="text-base font-semibold">계정 비밀번호 변경</h2>
+          <p className="mt-1 text-zinc-400">8자 이상의 새 비밀번호로 주기적으로 변경해 주세요.</p>
+          <form onSubmit={changePassword} className="mt-4 flex flex-wrap gap-3">
+            <input
+              required
+              type="password"
+              placeholder="현재 비밀번호"
+              value={curPassword}
+              onChange={(e) => setCurPassword(e.target.value)}
+              className="rounded-lg border border-[#1E2536] bg-[#0B0E14] px-3 py-2 text-zinc-100"
+            />
+            <input
+              required
+              type="password"
+              minLength={8}
+              placeholder="새 비밀번호 (8자 이상)"
+              value={newPassword}
+              onChange={(e) => setNewPassword(e.target.value)}
+              className="rounded-lg border border-[#1E2536] bg-[#0B0E14] px-3 py-2 text-zinc-100"
+            />
+            <button type="submit" className="rounded-lg bg-zinc-100 px-4 py-2 font-semibold text-zinc-950">
+              비밀번호 변경
+            </button>
+          </form>
         </section>
       </main>
     </div>

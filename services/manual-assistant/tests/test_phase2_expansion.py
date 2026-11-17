@@ -320,3 +320,51 @@ def test_member_upbit_sync_orders_and_trades_isolation(tmp_path, monkeypatch):
         assert up_a["credentials_count"] == 1
         assert "password_hash" not in up_a
         assert "totp_secret" not in up_a
+
+        # Member isolated export (CSV/JSON)
+        csv_a = client.get("/api/member/export?format=csv", headers=h_a)
+        assert csv_a.status_code == 200
+        assert "KRW-BTC" in csv_a.text
+        csv_b = client.get("/api/member/export?format=csv", headers=h_b)
+        assert csv_b.status_code == 200
+        assert "KRW-BTC" not in csv_b.text
+
+        # Member password change validation & re-login
+        assert (
+            client.post(
+                "/api/member/password",
+                headers=h_a,
+                json={"current_password": "wrong", "new_password": "newpassword123"},
+            ).status_code
+            == 400
+        )
+        assert (
+            client.post(
+                "/api/member/password",
+                headers=h_a,
+                json={"current_password": "password123", "new_password": "short"},
+            ).status_code
+            == 400
+        )
+        ok_pw = client.post(
+            "/api/member/password",
+            headers=h_a,
+            json={"current_password": "password123", "new_password": "newpassword123"},
+        )
+        assert ok_pw.status_code == 200
+        assert (
+            client.post(
+                "/api/auth/login",
+                headers=HEADERS,
+                json={"username": "upA@example.com", "password": "password123"},
+            ).status_code
+            == 401
+        )
+        assert (
+            client.post(
+                "/api/auth/login",
+                headers=HEADERS,
+                json={"username": "upA@example.com", "password": "newpassword123"},
+            ).status_code
+            == 200
+        )
