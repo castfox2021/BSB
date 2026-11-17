@@ -375,3 +375,36 @@ def test_member_upbit_sync_orders_and_trades_isolation(tmp_path, monkeypatch):
         assert rev.json()["revoked"] >= 1
         assert client.get("/api/member/sessions", headers=h_a).status_code == 401
         assert client.get("/api/member/sessions", headers=h_a2).status_code == 200
+
+        # MFA disable requires valid TOTP
+        from manual_assistant.auth_phase2 import totp_code
+
+        sec = client.post("/api/auth/mfa/setup", headers=h_a2, json={}).json()["secret"]
+        assert client.post("/api/auth/mfa/enable", headers=h_a2, json={"code": totp_code(sec)}).status_code == 200
+        assert client.post("/api/auth/mfa/disable", headers=h_a2, json={"code": "000000"}).status_code == 400
+        dis = client.post("/api/auth/mfa/disable", headers=h_a2, json={"code": totp_code(sec)})
+        assert dis.status_code == 200
+        assert dis.json()["mfa_enabled"] is False
+
+        # Member account deletion (wrong password 400, admin blocked 400, valid password 200)
+        assert client.post("/api/member/account/delete", headers=h_a2, json={"password": "wrong"}).status_code == 400
+        assert (
+            client.post(
+                "/api/member/account/delete",
+                headers={**HEADERS, "x-bsb-admin-session": a_tok},
+                json={"password": "bsb1234!"},
+            ).status_code
+            == 400
+        )
+        del_res = client.post("/api/member/account/delete", headers=h_a2, json={"password": "newpassword123"})
+        assert del_res.status_code == 200
+        assert del_res.json()["deleted"] is True
+        assert client.get("/api/member/sessions", headers=h_a2).status_code == 401
+        assert (
+            client.post(
+                "/api/auth/login",
+                headers=HEADERS,
+                json={"username": "upA@example.com", "password": "newpassword123"},
+            ).status_code
+            == 401
+        )

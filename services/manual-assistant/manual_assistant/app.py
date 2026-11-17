@@ -1535,6 +1535,16 @@ def create_app(
             raise HTTPException(status_code=400, detail="유효하지 않은 TOTP 코드입니다.")
         return {"mfa_enabled": True}
 
+    @app.post("/api/auth/mfa/disable")
+    async def auth_mfa_disable(request: Request):
+        data = await body(request)
+        uid, _ = _current_user(request)
+        if not app.state.identity.disable_mfa(uid, str(data.get("code") or "")):
+            raise HTTPException(status_code=400, detail="유효하지 않은 TOTP 코드입니다.")
+        with store.connect() as conn:
+            Storage.audit(conn, "mfa_disabled", {"user_id": uid})
+        return {"mfa_enabled": False}
+
     @app.get("/api/member/credentials")
     def member_list_credentials(request: Request):
         uid, _ = _current_user(request)
@@ -1797,6 +1807,23 @@ def create_app(
         token = request.headers.get("x-bsb-admin-session") or request.cookies.get("bsb_session")
         revoked = app.state.identity.revoke_other_sessions(uid, token)
         return {"revoked": revoked}
+
+    @app.post("/api/member/account/delete")
+    async def member_delete_account(request: Request):
+        data = await body(request)
+        uid, _ = _current_user(request)
+        ok, err_msg = app.state.identity.delete_member_account(uid, str(data.get("password") or ""))
+        if not ok:
+            raise HTTPException(status_code=400, detail=err_msg)
+        member_acc = f"member:{uid}"
+        with store.connect() as conn:
+            conn.execute("DELETE FROM private_accounts WHERE account_id=?", (member_acc,))
+            conn.execute("DELETE FROM exchange_fills WHERE account_id=?", (member_acc,))
+            conn.execute("DELETE FROM trade_positions WHERE account_id=?", (member_acc,))
+            Storage.audit(conn, "member_account_deleted", {"user_id": uid})
+        resp = JSONResponse({"deleted": True})
+        resp.delete_cookie("bsb_session", path="/")
+        return resp
 
     @app.get("/api/member/accounts")
     def member_accounts(request: Request):

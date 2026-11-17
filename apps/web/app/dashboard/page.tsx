@@ -54,6 +54,8 @@ export default function MemberDashboardPage() {
   const [mfaCode, setMfaCode] = useState('');
   const [curPassword, setCurPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
+  const [disableMfaCode, setDisableMfaCode] = useState('');
+  const [deletePassword, setDeletePassword] = useState('');
   const [memberSummary, setMemberSummary] = useState<{ trade_count: number; realized_pnl_krw: string; win_rate: string | null } | null>(null);
   const [byCoin, setByCoin] = useState<CoinStat[]>([]);
   const [memberBalances, setMemberBalances] = useState<MemberBalance[]>([]);
@@ -185,6 +187,43 @@ export default function MemberDashboardPage() {
     } else {
       setErr('인증 코드가 올바르지 않습니다.');
     }
+  }
+
+  async function disableMfa() {
+    setErr('');
+    setMsg('');
+    const res = await fetch('/api/manual/auth/mfa/disable', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ code: disableMfaCode }),
+    });
+    if (res.ok) {
+      setDisableMfaCode('');
+      setMsg('2단계 인증(TOTP)이 비활성화되었습니다.');
+      load();
+    } else {
+      setErr('유효하지 않은 TOTP 코드입니다.');
+    }
+  }
+
+  async function deleteAccount(e: FormEvent) {
+    e.preventDefault();
+    if (!window.confirm('정말 탈퇴하시겠습니까? 저장된 API 키·세션·동기화된 거래 통계가 모두 삭제됩니다.')) {
+      return;
+    }
+    setErr('');
+    setMsg('');
+    const res = await fetch('/api/manual/member/account/delete', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ password: deletePassword }),
+    });
+    const d = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      setErr(d.detail || d.error || '회원 탈퇴 실패');
+      return;
+    }
+    router.push('/');
   }
 
   async function logout() {
@@ -501,6 +540,23 @@ export default function MemberDashboardPage() {
               </div>
             </div>
           )}
+          {session?.mfa_enabled && (
+            <div className="mt-4 flex flex-wrap items-center gap-2 rounded-lg border border-[#1E2536] bg-[#0E1119] p-3">
+              <input
+                placeholder="비활성화용 6자리 TOTP"
+                value={disableMfaCode}
+                onChange={(e) => setDisableMfaCode(e.target.value)}
+                className="rounded-lg border border-[#1E2536] bg-[#0B0E14] px-3 py-1.5 font-mono text-zinc-100"
+              />
+              <button
+                type="button"
+                onClick={disableMfa}
+                className="rounded-lg border border-rose-500/40 bg-rose-500/10 px-3 py-1.5 font-semibold text-rose-300"
+              >
+                MFA 비활성화
+              </button>
+            </div>
+          )}
         </section>
 
         {/* 비밀번호 변경 */}
@@ -559,6 +615,29 @@ export default function MemberDashboardPage() {
             </div>
           )}
         </section>
+
+        {session?.role !== 'ADMIN' && (
+          <section className="rounded-xl border border-rose-900/50 bg-[#121620] p-6 text-xs">
+            <h2 className="text-base font-semibold text-rose-300">회원 탈퇴</h2>
+            <p className="mt-1 text-zinc-400">탈퇴 시 암호화된 API 키, 활성 세션 및 동기화된 개인 거래 데이터가 영구 삭제됩니다.</p>
+            <form onSubmit={deleteAccount} className="mt-4 flex flex-wrap gap-3">
+              <input
+                required
+                type="password"
+                placeholder="현재 비밀번호 확인"
+                value={deletePassword}
+                onChange={(e) => setDeletePassword(e.target.value)}
+                className="rounded-lg border border-[#1E2536] bg-[#0B0E14] px-3 py-2 text-zinc-100"
+              />
+              <button
+                type="submit"
+                className="rounded-lg border border-rose-500/50 bg-rose-500/15 px-4 py-2 font-semibold text-rose-300 hover:bg-rose-500/25"
+              >
+                계정 영구 삭제
+              </button>
+            </form>
+          </section>
+        )}
       </main>
     </div>
   );

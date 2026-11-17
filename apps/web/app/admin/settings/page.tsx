@@ -11,6 +11,7 @@ export default function AdminSettingsPage() {
   const [mfaEnabled, setMfaEnabled] = useState(false);
   const [mfaSecret, setMfaSecret] = useState('');
   const [mfaCode, setMfaCode] = useState('');
+  const [disableCode, setDisableCode] = useState('');
   const [mfaMsg, setMfaMsg] = useState('');
   const [pgPreview, setPgPreview] = useState<{ counts: Record<string, number>; ddl_preview: string } | null>(null);
   const [members, setMembers] = useState<{ id: string; email: string; role: string; mfa_enabled: boolean; exchanges: string[]; credentials_count: number; created_at: string }[]>([]);
@@ -57,6 +58,21 @@ export default function AdminSettingsPage() {
     }
   }
 
+  async function disableMfa() {
+    const res = await fetch('/api/manual/auth/mfa/disable', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ code: disableCode }),
+    });
+    if (res.ok) {
+      setDisableCode('');
+      setMfaEnabled(false);
+      setMfaMsg('운영자 2단계 인증(TOTP)이 비활성화되었습니다.');
+    } else {
+      setMfaMsg('유효하지 않은 TOTP 코드입니다.');
+    }
+  }
+
   return (
     <AdminShell>
       <div className="space-y-6">
@@ -93,6 +109,23 @@ export default function AdminSettingsPage() {
                   MFA 활성화
                 </button>
               </div>
+            </div>
+          )}
+          {mfaEnabled && (
+            <div className="mt-4 flex flex-wrap items-center gap-2 rounded-lg border border-[#1E2536] bg-[#0E1119] p-3">
+              <input
+                placeholder="비활성화용 6자리 TOTP"
+                value={disableCode}
+                onChange={(e) => setDisableCode(e.target.value)}
+                className="rounded-lg border border-[#1E2536] bg-[#0B0E14] px-3 py-1.5 font-mono text-zinc-100"
+              />
+              <button
+                type="button"
+                onClick={disableMfa}
+                className="rounded-lg border border-rose-500/40 bg-rose-500/10 px-3.5 py-1.5 font-semibold text-rose-300"
+              >
+                MFA 비활성화
+              </button>
             </div>
           )}
           {mfaMsg && <p className="mt-3 font-medium text-emerald-400">{mfaMsg}</p>}

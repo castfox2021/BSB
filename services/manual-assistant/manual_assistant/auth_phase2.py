@@ -262,6 +262,28 @@ class Phase2IdentityService:
             row = conn.execute("SELECT totp_secret FROM users WHERE id=?", (user_id,)).fetchone()
             return bool(row and row["totp_secret"] and verify_totp(row["totp_secret"], code))
 
+    def disable_mfa(self, user_id: str, code: str) -> bool:
+        if not self.verify_user_mfa(user_id, code):
+            return False
+        with self.store.connect() as conn:
+            conn.execute("UPDATE users SET mfa_enabled=0, totp_secret=NULL WHERE id=?", (user_id,))
+        return True
+
+    def delete_member_account(self, user_id: str, password: str) -> tuple[bool, str]:
+        with self.store.connect() as conn:
+            row = conn.execute(
+                "SELECT password_hash, role FROM users WHERE id=?",
+                (user_id,),
+            ).fetchone()
+            if not row or row["role"] == "ADMIN" or row["password_hash"] == "admin-managed":
+                return False, "운영자 계정은 탈퇴할 수 없습니다."
+            if not verify_scrypt(password, row["password_hash"]):
+                return False, "비밀번호가 올바르지 않습니다."
+            conn.execute("DELETE FROM user_exchange_credentials WHERE user_id=?", (user_id,))
+            conn.execute("DELETE FROM user_sessions WHERE user_id=?", (user_id,))
+            conn.execute("DELETE FROM users WHERE id=?", (user_id,))
+        return True, "ok"
+
     def change_password(self, user_id: str, current_password: str, new_password: str) -> tuple[bool, str]:
         if len(new_password) < 8:
             return False, "새 비밀번호는 8자 이상이어야 합니다."
