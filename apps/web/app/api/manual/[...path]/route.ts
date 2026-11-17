@@ -68,10 +68,15 @@ const routes = new Set([
   'analytics/recalculate',
   'analytics/export',
   'auth/login',
+  'auth/register',
   'auth/logout',
   'auth/session',
+  'auth/mfa/setup',
+  'auth/mfa/enable',
+  'member/credentials',
   'public/market/summary',
   'public/market/tickers',
+  'public/exchanges/tickers',
   'public/strategies/overview',
   'public/performance/summary',
   'public/platform/status',
@@ -115,7 +120,8 @@ async function forward(request: Request, context: Context) {
     /^market\/candles\/KRW-[A-Z0-9]+$/.test(path) ||
     /^admin\/strategy-reports\/[a-f0-9]{32}(\/download)?$/.test(path) ||
     /^analytics\/trades\/[a-zA-Z0-9_-]+$/.test(path) ||
-    /^analytics\/reconciliation\/[a-zA-Z0-9_-]+\/resolve$/.test(path);
+    /^analytics\/reconciliation\/[a-zA-Z0-9_-]+\/resolve$/.test(path) ||
+    /^member\/credentials\/[a-f0-9]{32}$/.test(path);
 
   if (!dynamicAllowed && !routes.has(path)) {
     return Response.json({ error: 'unsupported route' }, { status: 404 });
@@ -124,7 +130,7 @@ async function forward(request: Request, context: Context) {
   if (
     request.method !== 'GET' &&
     (request.headers.get('origin') !== browserOrigin ||
-      !request.headers.get('content-type')?.startsWith('application/json'))
+      (request.method !== 'DELETE' && !request.headers.get('content-type')?.startsWith('application/json')))
   ) {
     return Response.json({ error: 'same-origin JSON required' }, { status: 403 });
   }
@@ -198,3 +204,4 @@ export const GET = forward;
 export const PATCH = forward;
 export const POST = forward;
 export const PUT = forward;
+export const DELETE = forward;

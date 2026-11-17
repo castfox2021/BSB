@@ -12,6 +12,7 @@ export async function middleware(req: NextRequest) {
     pathname === '/strategies' ||
     pathname === '/performance' ||
     pathname === '/login' ||
+    pathname === '/register' ||
     pathname.startsWith('/_next') ||
     pathname === '/robots.txt' ||
     pathname === '/favicon.ico' ||

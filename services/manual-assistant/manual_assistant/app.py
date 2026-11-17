@@ -193,6 +193,12 @@ def create_app(
         from .public_api import AdminAuthService
 
         app.state.admin_auth = AdminAuthService(store)
+        from .auth_phase2 import Phase2IdentityService
+        from .exchange_adapter import BithumbAdapter, UpbitAdapter
+
+        app.state.identity = Phase2IdentityService(store)
+        app.state.bithumb_adapter = BithumbAdapter(market)
+        app.state.upbit_adapter = UpbitAdapter()
         app.state.orders = ManualOrders(store, market, private, engine)
         private.orders = app.state.orders
         app.state.orders.live_execution_disabled = True
@@ -246,7 +252,7 @@ def create_app(
         CORSMiddleware,
         allow_origins=allowed,
         allow_credentials=False,
-        allow_methods=["GET", "POST", "PUT", "PATCH"],
+        allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE"],
         allow_headers=["Content-Type", "X-BSB-Local", "X-BSB-Admin-Session"],
     )
 
@@ -261,7 +267,7 @@ def create_app(
                 return JSONResponse(
                     {"error": "local origin and X-BSB-Local required"}, status_code=403
                 )
-            if (
+            if request.method != "DELETE" and (
                 request.headers.get("content-type", "").split(";")[0]
                 != "application/json"
             ):
@@ -272,13 +278,19 @@ def create_app(
             is_open = (
                 req_path == "/api/health"
                 or req_path.startswith("/api/public/")
-                or req_path.startswith("/api/auth/")
+                or req_path in ("/api/auth/login", "/api/auth/register", "/api/auth/logout", "/api/auth/session")
             )
             if not is_open:
                 token = request.headers.get("x-bsb-admin-session") or request.cookies.get("bsb_session")
                 admin_auth = getattr(app.state, "admin_auth", None)
-                if not admin_auth or not admin_auth.validate(token):
-                    return JSONResponse({"error": "운영자 로그인이 필요합니다."}, status_code=401)
+                identity = getattr(app.state, "identity", None)
+                is_admin = bool(admin_auth and admin_auth.validate(token))
+                member_sess = identity.validate_session(token) if identity else None
+                if req_path.startswith("/api/member/") or req_path.startswith("/api/auth/mfa/"):
+                    if not (is_admin or member_sess):
+                        return JSONResponse({"error": "로그인이 필요합니다."}, status_code=401)
+                elif not is_admin:
+                    return JSONResponse({"error": "운영자 권한이 필요합니다."}, status_code=401)
         return await call_next(request)
 
     @app.exception_handler(ValueError)
@@ -1365,29 +1377,131 @@ def create_app(
             headers={"Content-Disposition": f'attachment; filename="{filename}"'},
         )
 
+    def _current_user(request: Request) -> tuple[str, str]:
+        token = request.headers.get("x-bsb-admin-session") or request.cookies.get("bsb_session")
+        admin_user = app.state.admin_auth.validate(token)
+        if admin_user:
+            return "admin", "ADMIN"
+        sess = app.state.identity.validate_session(token)
+        if sess:
+            return sess["user_id"], sess["role"]
+        raise HTTPException(status_code=401, detail="인증이 필요합니다.")
+
+    @app.post("/api/auth/register")
+    async def auth_register(request: Request):
+        data = await body(request)
+        try:
+            return app.state.identity.register_member(
+                str(data.get("email") or ""), str(data.get("password") or "")
+            )
+        except ValueError as error:
+            raise HTTPException(status_code=400, detail=str(error)) from error
+
     @app.post("/api/auth/login")
     async def auth_login(request: Request):
         data = await body(request)
         ip = request.client.host if request.client else "unknown"
-        token, status_code, message = app.state.admin_auth.login(
-            str(data.get("username") or ""), str(data.get("password") or ""), ip=ip
-        )
-        if not token:
-            raise HTTPException(status_code=status_code, detail=message)
-        return {"authenticated": True, "username": str(data.get("username") or "admin"), "token": token}
+        uname = str(data.get("username") or "")
+        pwd = str(data.get("password") or "")
+        totp = str(data.get("totp_code") or "")
+
+        token, status_code, message = app.state.admin_auth.login(uname, pwd, ip=ip)
+        if token:
+            if app.state.identity.is_mfa_enabled("admin") and not app.state.identity.verify_user_mfa("admin", totp):
+                app.state.admin_auth.logout(token, ip=ip)
+                raise HTTPException(status_code=401, detail="운영자 2단계 인증(TOTP) 코드가 필요합니다.")
+            return {"authenticated": True, "username": uname, "role": "ADMIN", "token": token}
+
+        if status_code == 429:
+            raise HTTPException(status_code=429, detail=message)
+
+        member, m_status, m_msg = app.state.identity.authenticate_member(uname, pwd, totp=totp, ip=ip)
+        if member:
+            return {
+                "authenticated": True,
+                "username": member["username"],
+                "role": member["role"],
+                "token": member["token"],
+            }
+        raise HTTPException(status_code=401, detail=m_msg if "@" in uname else message)
 
     @app.post("/api/auth/logout")
     async def auth_logout(request: Request):
         token = request.headers.get("x-bsb-admin-session") or request.cookies.get("bsb_session")
         ip = request.client.host if request.client else "unknown"
         app.state.admin_auth.logout(token, ip=ip)
+        app.state.identity.revoke_session(token)
         return {"authenticated": False}
 
     @app.get("/api/auth/session")
     def auth_session(request: Request):
         token = request.headers.get("x-bsb-admin-session") or request.cookies.get("bsb_session")
         user = app.state.admin_auth.validate(token)
-        return {"authenticated": bool(user), "username": user}
+        if user:
+            return {
+                "authenticated": True,
+                "username": user,
+                "role": "ADMIN",
+                "mfa_enabled": app.state.identity.is_mfa_enabled("admin"),
+            }
+        sess = app.state.identity.validate_session(token)
+        if sess:
+            return {
+                "authenticated": True,
+                "username": sess["username"],
+                "role": sess["role"],
+                "mfa_enabled": app.state.identity.is_mfa_enabled(sess["user_id"]),
+            }
+        return {"authenticated": False, "username": None, "role": None, "mfa_enabled": False}
+
+    @app.post("/api/auth/mfa/setup")
+    async def auth_mfa_setup(request: Request):
+        await body(request)
+        uid, _ = _current_user(request)
+        return app.state.identity.setup_mfa(uid)
+
+    @app.post("/api/auth/mfa/enable")
+    async def auth_mfa_enable(request: Request):
+        data = await body(request)
+        uid, _ = _current_user(request)
+        if not app.state.identity.enable_mfa(uid, str(data.get("code") or "")):
+            raise HTTPException(status_code=400, detail="유효하지 않은 TOTP 코드입니다.")
+        return {"mfa_enabled": True}
+
+    @app.get("/api/member/credentials")
+    def member_list_credentials(request: Request):
+        uid, _ = _current_user(request)
+        return {"items": app.state.identity.list_credentials(uid)}
+
+    @app.post("/api/member/credentials")
+    async def member_save_credential(request: Request):
+        data = await body(request)
+        uid, _ = _current_user(request)
+        try:
+            return app.state.identity.save_credential(
+                uid,
+                str(data.get("exchange") or "BITHUMB"),
+                str(data.get("label") or ""),
+                str(data.get("access_key") or ""),
+                str(data.get("secret_key") or ""),
+            )
+        except ValueError as error:
+            raise HTTPException(status_code=400, detail=str(error)) from error
+
+    @app.delete("/api/member/credentials/{cred_id}")
+    def member_delete_credential(cred_id: str, request: Request):
+        uid, _ = _current_user(request)
+        if not app.state.identity.delete_credential(uid, cred_id):
+            raise HTTPException(status_code=404, detail="키를 찾을 수 없습니다.")
+        return {"deleted": True}
+
+    @app.get("/api/public/exchanges/tickers")
+    async def get_public_exchange_tickers(exchange: str = "bithumb", limit: int = 100):
+        ex = exchange.strip().lower()
+        lim = max(1, min(limit, 200))
+        if ex == "upbit":
+            return {"exchange": "UPBIT", "items": await app.state.upbit_adapter.fetch_tickers(lim)}
+        return {"exchange": "BITHUMB", "items": await app.state.bithumb_adapter.fetch_tickers(lim)}
 
     @app.get("/api/public/market/summary")
     def get_public_market_summary():
