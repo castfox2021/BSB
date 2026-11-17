@@ -1538,81 +1538,116 @@ def create_app(
     async def member_sync(request: Request):
         await body(request)
         uid, _ = _current_user(request)
-        creds_pair = app.state.identity.get_decrypted_credential(uid, "BITHUMB")
-        if not creds_pair:
-            raise HTTPException(status_code=400, detail="저장된 BITHUMB API 키가 없습니다.")
-        from .private_auth import Credentials
-        from .private_client import PrivateClient
-
-        client = PrivateClient(Credentials(creds_pair[0], creds_pair[1]))
+        bithumb_pair = app.state.identity.get_decrypted_credential(uid, "BITHUMB")
+        upbit_pair = app.state.identity.get_decrypted_credential(uid, "UPBIT")
+        if not bithumb_pair and not upbit_pair:
+            raise HTTPException(status_code=400, detail="저장된 BITHUMB 또는 UPBIT API 키가 없습니다.")
         member_acc = f"member:{uid}"
         inserted_fills = 0
-        try:
-            accounts = await client.get("/v1/accounts")
-            if isinstance(accounts, list):
-                with store.connect() as conn:
-                    conn.execute("DELETE FROM private_accounts WHERE account_id=?", (member_acc,))
-                    for acc in accounts:
-                        conn.execute(
-                            "INSERT INTO private_accounts VALUES (?,?,?,?,?,?,?)",
-                            (
-                                member_acc,
-                                str(acc.get("currency") or ""),
-                                str(acc.get("balance") or "0"),
-                                str(acc.get("locked") or "0"),
-                                str(acc.get("avg_buy_price") or "0"),
-                                str(acc.get("unit_currency") or "KRW"),
-                                now(),
-                            ),
-                        )
-            orders = await client.get("/v1/orders", {"states[]": "done", "page": 1, "limit": 50, "order_by": "desc"})
-            if isinstance(orders, list):
-                with store.connect() as conn:
-                    for o in orders:
-                        ex_oid = str(o.get("uuid") or "")
-                        exec_vol = Decimal(str(o.get("executed_volume") or "0"))
-                        if not ex_oid or exec_vol <= 0:
-                            continue
-                        side = "BUY" if str(o.get("side", "")).lower() in ("bid", "buy") else "SELL"
-                        price = Decimal(str(o.get("price") or "0"))
-                        funds = Decimal(str(o.get("executed_funds") or (price * exec_vol)))
-                        fee = Decimal(str(o.get("paid_fee") or "0"))
-                        conn.execute(
-                            """INSERT OR IGNORE INTO exchange_fills
-                            (id,exchange,account_id,exchange_fill_id,exchange_order_id,client_order_id,market,side,fill_price,fill_quantity,fill_amount,fee_amount,fee_currency,fee_krw_equiv,fee_eval_note,execution_origin,data_source,source_hash,filled_at,raw_payload)
-                            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-                            (
-                                uuid4().hex,
-                                "bithumb",
-                                member_acc,
-                                ex_oid,
-                                ex_oid,
-                                o.get("client_order_id"),
-                                o.get("market", ""),
-                                side,
-                                str(price if price > 0 else (funds / exec_vol if exec_vol > 0 else 0)),
-                                str(exec_vol),
-                                str(funds),
-                                str(fee),
-                                "KRW",
-                                str(fee),
-                                "member_sync",
-                                "MANUAL",
-                                "BITHUMB_API",
-                                None,
-                                o.get("created_at") or now(),
-                                json.dumps({"uuid": ex_oid}),
-                            ),
-                        )
-                        inserted_fills += conn.execute("SELECT changes()").fetchone()[0]
-            app.state.analytics_ledger.recalculate(member_acc)
-            return {
-                "synced": True,
-                "accounts_count": len(accounts) if isinstance(accounts, list) else 0,
-                "inserted_fills": inserted_fills,
-            }
-        finally:
-            await client.close()
+        accounts_count = 0
+        with store.connect() as conn:
+            conn.execute("DELETE FROM private_accounts WHERE account_id=?", (member_acc,))
+
+        if bithumb_pair:
+            from .private_auth import Credentials
+            from .private_client import PrivateClient
+
+            client = PrivateClient(Credentials(bithumb_pair[0], bithumb_pair[1]))
+            try:
+                accounts = await client.get("/v1/accounts")
+                if isinstance(accounts, list):
+                    accounts_count += len(accounts)
+                    with store.connect() as conn:
+                        for acc in accounts:
+                            conn.execute(
+                                "INSERT OR REPLACE INTO private_accounts VALUES (?,?,?,?,?,?,?)",
+                                (
+                                    member_acc,
+                                    str(acc.get("currency") or ""),
+                                    str(acc.get("balance") or "0"),
+                                    str(acc.get("locked") or "0"),
+                                    str(acc.get("avg_buy_price") or "0"),
+                                    str(acc.get("unit_currency") or "KRW"),
+                                    now(),
+                                ),
+                            )
+                orders = await client.get("/v1/orders", {"states[]": "done", "page": 1, "limit": 50, "order_by": "desc"})
+                if isinstance(orders, list):
+                    with store.connect() as conn:
+                        for o in orders:
+                            ex_oid = str(o.get("uuid") or "")
+                            exec_vol = Decimal(str(o.get("executed_volume") or "0"))
+                            if not ex_oid or exec_vol <= 0:
+                                continue
+                            side = "BUY" if str(o.get("side", "")).lower() in ("bid", "buy") else "SELL"
+                            price = Decimal(str(o.get("price") or "0"))
+                            funds = Decimal(str(o.get("executed_funds") or (price * exec_vol)))
+                            fee = Decimal(str(o.get("paid_fee") or "0"))
+                            conn.execute(
+                                """INSERT OR IGNORE INTO exchange_fills
+                                (id,exchange,account_id,exchange_fill_id,exchange_order_id,client_order_id,market,side,fill_price,fill_quantity,fill_amount,fee_amount,fee_currency,fee_krw_equiv,fee_eval_note,execution_origin,data_source,source_hash,filled_at,raw_payload)
+                                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                                (
+                                    uuid4().hex,
+                                    "bithumb",
+                                    member_acc,
+                                    ex_oid,
+                                    ex_oid,
+                                    o.get("client_order_id"),
+                                    o.get("market", ""),
+                                    side,
+                                    str(price if price > 0 else (funds / exec_vol if exec_vol > 0 else 0)),
+                                    str(exec_vol),
+                                    str(funds),
+                                    str(fee),
+                                    "KRW",
+                                    str(fee),
+                                    "member_sync",
+                                    "MANUAL",
+                                    "BITHUMB_API",
+                                    None,
+                                    o.get("created_at") or now(),
+                                    json.dumps({"uuid": ex_oid}),
+                                ),
+                            )
+                            inserted_fills += conn.execute("SELECT changes()").fetchone()[0]
+            finally:
+                await client.close()
+
+        if upbit_pair:
+            import httpx
+            import jwt as pyjwt
+
+            up_token = pyjwt.encode({"access_key": upbit_pair[0], "nonce": str(uuid4())}, upbit_pair[1], algorithm="HS256")
+            async with httpx.AsyncClient(timeout=8, follow_redirects=False, trust_env=False) as uclient:
+                ures = await uclient.get(
+                    "https://api.upbit.com/v1/accounts",
+                    headers={"Authorization": f"Bearer {up_token}"},
+                )
+                if ures.status_code == 200 and isinstance(ures.json(), list):
+                    u_accounts = ures.json()
+                    accounts_count += len(u_accounts)
+                    with store.connect() as conn:
+                        for acc in u_accounts:
+                            conn.execute(
+                                "INSERT OR REPLACE INTO private_accounts VALUES (?,?,?,?,?,?,?)",
+                                (
+                                    member_acc,
+                                    f"UPBIT:{acc.get('currency', '')}",
+                                    str(acc.get("balance") or "0"),
+                                    str(acc.get("locked") or "0"),
+                                    str(acc.get("avg_buy_price") or "0"),
+                                    str(acc.get("unit_currency") or "KRW"),
+                                    now(),
+                                ),
+                            )
+
+        app.state.analytics_ledger.recalculate(member_acc)
+        return {
+            "synced": True,
+            "accounts_count": accounts_count,
+            "inserted_fills": inserted_fills,
+        }
 
     @app.get("/api/member/analytics")
     def member_analytics(request: Request):

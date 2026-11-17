@@ -17,18 +17,25 @@ export default function AdminDashboardPage() {
   const [trade, setTrade] = useState<PaperTrade | null>(null);
   const [symbol, setSymbol] = useState('KRW-BTC');
   const [accounts, setAccounts] = useState<RealAccount[]>([]);
+  const [prices, setPrices] = useState<Record<string, number>>({});
 
   useEffect(() => {
     let active = true;
     const load = async () => {
       try {
-        const [res, acc] = await Promise.all([
+        const [res, acc, ticks] = await Promise.all([
           api<Board>(`board?buy_page=${buyPage}&sell_page=${sellPage}`),
           api<{ items?: RealAccount[] }>('private/accounts').catch(() => ({ items: [] })),
+          api<{ items?: { symbol: string; price: string | null }[] }>('public/market/tickers?limit=300').catch(() => ({ items: [] })),
         ]);
         if (active) {
           setBoard(res);
           setAccounts(acc.items ?? []);
+          const pmap: Record<string, number> = {};
+          for (const t of ticks.items ?? []) {
+            if (t.price) pmap[t.symbol] = Number(t.price);
+          }
+          setPrices(pmap);
           setError('');
         }
       } catch {
@@ -86,12 +93,24 @@ export default function AdminDashboardPage() {
                   const sym = `KRW-${a.currency}`;
                   const qty = Number(a.balance) + Number(a.locked);
                   const avg = Number(a.average_price || 0);
+                  const cur = prices[sym] ?? 0;
+                  const pnlKrw = avg > 0 && cur > 0 ? (cur - avg) * qty : null;
+                  const pnlPct = avg > 0 && cur > 0 ? ((cur / avg) - 1) * 100 : null;
                   return (
                     <div key={a.currency} className="flex items-center justify-between rounded-lg border border-[#1E2536] bg-[#0E1119] px-3.5 py-2.5 text-xs">
                       <div>
-                        <strong className="font-mono text-sm text-zinc-100">{a.currency}</strong>
+                        <div className="flex items-center gap-2">
+                          <strong className="font-mono text-sm text-zinc-100">{a.currency}</strong>
+                          {pnlPct !== null && (
+                            <span className={`font-mono text-xs font-semibold ${pnlPct > 0 ? 'text-rose-400' : pnlPct < 0 ? 'text-sky-400' : 'text-zinc-400'}`}>
+                              {pnlPct > 0 ? '+' : ''}{pnlPct.toFixed(2)}%
+                            </span>
+                          )}
+                        </div>
                         <p className="mt-0.5 font-mono text-[11px] text-zinc-400">
                           수량 {quantityText(qty)} · 평단 {avg > 0 ? `${priceText(String(avg))}원` : '—'}
+                          {cur > 0 ? ` · 현재 ${priceText(String(cur))}원` : ''}
+                          {pnlKrw !== null ? ` (${signedMoney(String(pnlKrw))})` : ''}
                         </p>
                       </div>
                       <button
