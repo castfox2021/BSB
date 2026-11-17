@@ -11,9 +11,9 @@ class Storage:
 
     @contextmanager
     def connect(self):
-        connection = sqlite3.connect(self.path, timeout=5)
+        connection = sqlite3.connect(self.path, timeout=30)
         connection.row_factory = sqlite3.Row
-        connection.execute("PRAGMA busy_timeout=5000")
+        connection.execute("PRAGMA busy_timeout=30000")
         try:
             with connection:
                 yield connection
@@ -29,7 +29,7 @@ class Storage:
                     "database is newer than this application; refusing to downgrade"
                 )
             conn.execute("PRAGMA journal_mode=WAL")
-            conn.execute("PRAGMA synchronous=FULL")
+            conn.execute("PRAGMA synchronous=NORMAL")
             if version == 0:
                 conn.executescript("""
                 BEGIN IMMEDIATE;

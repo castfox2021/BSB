@@ -939,12 +939,15 @@ class Market:
                     if "trade" in types:
                         self.connections[symbol] = False
                         self.mark_gap(symbol)
-                        await asyncio.to_thread(
-                            self.book.gap,
-                            symbol,
-                            self.received_at.get(symbol, time.time()) - 30,
-                            "WebSocket 재연결/종료",
-                        )
+                        try:
+                            await asyncio.to_thread(
+                                self.book.gap,
+                                symbol,
+                                self.received_at.get(symbol, time.time()) - 30,
+                                "WebSocket 재연결/종료",
+                            )
+                        except Exception as gap_err:
+                            logger.warning("market.gap skipped for %s: %s", symbol, gap_err)
                     if "orderbook" in types:
                         self.detail_sources.setdefault(symbol, set()).discard(session)
             attempt += 1
