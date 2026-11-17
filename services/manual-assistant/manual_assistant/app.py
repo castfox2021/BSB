@@ -2025,6 +2025,135 @@ def create_app(
         store.audit_event("member_open_order_canceled", {"user_id": uid, "exchange": ex, "uuid": order_uuid})
         return {"canceled": True, "exchange": ex, "uuid": order_uuid}
 
+    @app.post("/api/member/orders")
+    async def member_submit_order(request: Request):
+        uid, _ = _current_user(request)
+        payload = await body(request)
+        if not payload.get("confirm"):
+            raise HTTPException(status_code=400, detail="실제 주문 실행 확인(confirm)이 필요합니다.")
+
+        ex = str(payload.get("exchange") or "").strip().upper()
+        if ex not in ("BITHUMB", "UPBIT"):
+            raise HTTPException(status_code=400, detail="지원하지 않는 거래소입니다.")
+        pair = app.state.identity.get_decrypted_credential(uid, ex)
+        if not pair:
+            raise HTTPException(status_code=404, detail=f"{ex} API 키가 등록되어 있지 않습니다.")
+
+        raw_market = str(payload.get("market") or "").strip().upper()
+        if not raw_market:
+            raise HTTPException(status_code=400, detail="마켓(예: KRW-BTC)을 입력하세요.")
+        market_code = raw_market if "-" in raw_market else f"KRW-{raw_market}"
+
+        side_in = str(payload.get("side") or "").strip().upper()
+        if side_in not in ("BUY", "SELL"):
+            raise HTTPException(status_code=400, detail="주문 구분은 BUY 또는 SELL이어야 합니다.")
+        ex_side = "bid" if side_in == "BUY" else "ask"
+
+        ord_type_in = str(payload.get("ord_type") or "limit").strip().lower()
+        if ord_type_in not in ("limit", "market"):
+            raise HTTPException(status_code=400, detail="주문 유형은 limit 또는 market이어야 합니다.")
+
+        from decimal import Decimal, InvalidOperation
+
+        def _pos_dec(val, label: str) -> Decimal:
+            try:
+                d = Decimal(str(val or "").strip())
+            except InvalidOperation:
+                raise HTTPException(status_code=400, detail=f"올바른 {label} 값을 입력하세요.") from None
+            if d <= 0:
+                raise HTTPException(status_code=400, detail=f"{label}은(는) 0보다 커야 합니다.")
+            return d
+
+        client_oid = f"bsbm-{uuid4().hex[:16]}"
+        order_params: dict[str, str] = {"market": market_code, "side": ex_side}
+
+        if ord_type_in == "limit":
+            price_d = _pos_dec(payload.get("price"), "주문 가격")
+            vol_d = _pos_dec(payload.get("volume"), "주문 수량")
+            if price_d * vol_d < Decimal("5000"):
+                raise HTTPException(status_code=400, detail="최소 주문 금액은 5,000원 이상이어야 합니다.")
+            order_params["price"] = format(price_d.normalize(), "f")
+            order_params["volume"] = format(vol_d.normalize(), "f")
+            ex_ord_type = "limit"
+        elif side_in == "BUY":
+            price_d = _pos_dec(payload.get("price"), "주문 총액(원)")
+            if price_d < Decimal("5000"):
+                raise HTTPException(status_code=400, detail="시장가 매수 최소 금액은 5,000원 이상이어야 합니다.")
+            order_params["price"] = format(price_d.normalize(), "f")
+            ex_ord_type = "price"
+        else:
+            vol_d = _pos_dec(payload.get("volume"), "주문 수량")
+            order_params["volume"] = format(vol_d.normalize(), "f")
+            ex_ord_type = "market"
+
+        if ex == "BITHUMB":
+            from .private_auth import Credentials, serialize
+            from .private_client import BASE, PrivateClient
+
+            order_params["order_type"] = ex_ord_type
+            order_params["client_order_id"] = client_oid
+            client = PrivateClient(Credentials(pair[0], pair[1]))
+            try:
+                token = client.auth.token(serialize(order_params))
+                res = await client.http.post(
+                    f"{BASE}/v2/orders",
+                    json=order_params,
+                    headers={"Authorization": f"Bearer {token}", "Accept": "application/json"},
+                )
+            finally:
+                await client.close()
+            if res.status_code not in (200, 201):
+                detail_msg = res.text[:200]
+                try:
+                    detail_msg = res.json().get("error", {}).get("message") or detail_msg
+                except Exception:
+                    pass
+                raise HTTPException(status_code=400, detail=f"BITHUMB 주문 실패 (HTTP {res.status_code}): {detail_msg}")
+            resp_data = res.json() if res.text else {}
+            order_id = str(resp_data.get("order_id") or resp_data.get("uuid") or client_oid)
+        else:
+            import hashlib
+            from urllib.parse import urlencode
+
+            import httpx
+            import jwt as pyjwt
+
+            order_params["ord_type"] = ex_ord_type
+            order_params["identifier"] = client_oid
+            query_string = urlencode(list(order_params.items()))
+            qhash = hashlib.sha512(query_string.encode("utf-8")).hexdigest()
+            token = pyjwt.encode(
+                {
+                    "access_key": pair[0],
+                    "nonce": str(uuid4()),
+                    "query_hash": qhash,
+                    "query_hash_alg": "SHA512",
+                },
+                pair[1],
+                algorithm="HS256",
+            )
+            async with httpx.AsyncClient(timeout=8, follow_redirects=False, trust_env=False) as uclient:
+                res = await uclient.post(
+                    "https://api.upbit.com/v1/orders",
+                    json=order_params,
+                    headers={"Authorization": f"Bearer {token}", "Accept": "application/json"},
+                )
+            if res.status_code not in (200, 201):
+                detail_msg = res.text[:200]
+                try:
+                    detail_msg = res.json().get("error", {}).get("message") or detail_msg
+                except Exception:
+                    pass
+                raise HTTPException(status_code=400, detail=f"UPBIT 주문 실패 (HTTP {res.status_code}): {detail_msg}")
+            resp_data = res.json() if res.text else {}
+            order_id = str(resp_data.get("uuid") or client_oid)
+
+        store.audit_event(
+            "member_manual_order_submitted",
+            {"user_id": uid, "exchange": ex, "market": market_code, "side": side_in, "ord_type": ord_type_in, "order_id": order_id},
+        )
+        return {"submitted": True, "exchange": ex, "market": market_code, "side": side_in, "ord_type": ord_type_in, "order_id": order_id}
+
     @app.get("/api/member/trades")
     def member_trades(
         request: Request, page: int = 1, page_size: int = 20, exchange: str = "ALL", period: str = "all", market: str = "ALL"

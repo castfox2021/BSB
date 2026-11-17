@@ -87,6 +87,13 @@ export default function MemberDashboardPage() {
     watch_alerts_enabled: false,
   });
   const [lastAutoSync, setLastAutoSync] = useState('');
+  const [orderExchange, setOrderExchange] = useState<'BITHUMB' | 'UPBIT'>('BITHUMB');
+  const [orderMarket, setOrderMarket] = useState('KRW-BTC');
+  const [orderSide, setOrderSide] = useState<'BUY' | 'SELL'>('BUY');
+  const [orderType, setOrderType] = useState<'limit' | 'market'>('limit');
+  const [orderPrice, setOrderPrice] = useState('');
+  const [orderVolume, setOrderVolume] = useState('');
+  const [orderBusy, setOrderBusy] = useState(false);
   const [msg, setMsg] = useState('');
   const [err, setErr] = useState('');
   const prevWatchRef = useRef<Set<string> | null>(null);
@@ -186,6 +193,51 @@ export default function MemberDashboardPage() {
     setTradesPage(nextPage);
     setMemberTrades(tr.items ?? []);
     setTradesTotal(Number(tr.total ?? (tr.items ?? []).length));
+  }
+
+  async function submitMemberOrder(e: FormEvent) {
+    e.preventDefault();
+    setErr('');
+    setMsg('');
+    const mkt = normalizeMarketParam(orderMarket);
+    if (mkt === 'ALL') {
+      setErr('주문할 마켓(예: KRW-BTC)을 입력하세요.');
+      return;
+    }
+    const summaryLabel =
+      orderType === 'limit'
+        ? `${orderExchange} ${mkt} ${orderSide === 'BUY' ? '지정가 매수' : '지정가 매도'} · 가격 ${orderPrice}원 · 수량 ${orderVolume}`
+        : orderSide === 'BUY'
+          ? `${orderExchange} ${mkt} 시장가 매수 · 총액 ${orderPrice}원`
+          : `${orderExchange} ${mkt} 시장가 매도 · 수량 ${orderVolume}`;
+    if (!window.confirm(`실제 거래소 주문을 실행하시겠습니까?\n\n${summaryLabel}`)) return;
+    setOrderBusy(true);
+    try {
+      const res = await fetch('/api/manual/member/orders', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          exchange: orderExchange,
+          market: mkt,
+          side: orderSide,
+          ord_type: orderType,
+          price: orderPrice,
+          volume: orderVolume,
+          confirm: true,
+        }),
+      });
+      const d = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setErr(d.detail || d.error || '주문 실행 실패');
+        return;
+      }
+      setOrderPrice('');
+      setOrderVolume('');
+      setMsg(`주문이 접수되었습니다. (${d.exchange} ${d.market} · ${d.order_id})`);
+      load();
+    } finally {
+      setOrderBusy(false);
+    }
   }
 
   async function cancelOpenOrder(exchange: string, uuid: string) {
@@ -733,6 +785,78 @@ export default function MemberDashboardPage() {
               </table>
             </div>
           )}
+        </section>
+
+        {/* 간편 수동 주문 (내 API 키) */}
+        <section className="rounded-xl border border-[#1E2536] bg-[#121620] p-6 text-xs">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <h2 className="text-base font-semibold">간편 수동 주문 (내 API 키)</h2>
+              <p className="mt-1 text-zinc-400">회원 본인의 암호화 API 키로 빗썸·업비트 지정가/시장가 주문을 직접 실행합니다. (최소 5,000원)</p>
+            </div>
+          </div>
+          <form onSubmit={submitMemberOrder} className="mt-4 grid gap-3 font-mono text-[11px] sm:grid-cols-6">
+            <select
+              value={orderExchange}
+              onChange={(e) => setOrderExchange(e.target.value as 'BITHUMB' | 'UPBIT')}
+              className="rounded-lg border border-[#1E2536] bg-[#0E1119] px-3 py-2 text-zinc-100"
+            >
+              <option value="BITHUMB">BITHUMB</option>
+              <option value="UPBIT">UPBIT</option>
+            </select>
+            <input
+              value={orderMarket}
+              onChange={(e) => setOrderMarket(e.target.value)}
+              placeholder="KRW-BTC"
+              className="rounded-lg border border-[#1E2536] bg-[#0E1119] px-3 py-2 text-zinc-100"
+              required
+            />
+            <select
+              value={orderSide}
+              onChange={(e) => setOrderSide(e.target.value as 'BUY' | 'SELL')}
+              className="rounded-lg border border-[#1E2536] bg-[#0E1119] px-3 py-2 text-zinc-100"
+            >
+              <option value="BUY">매수 (BUY)</option>
+              <option value="SELL">매도 (SELL)</option>
+            </select>
+            <select
+              value={orderType}
+              onChange={(e) => setOrderType(e.target.value as 'limit' | 'market')}
+              className="rounded-lg border border-[#1E2536] bg-[#0E1119] px-3 py-2 text-zinc-100"
+            >
+              <option value="limit">지정가</option>
+              <option value="market">시장가</option>
+            </select>
+            {(orderType === 'limit' || orderSide === 'BUY') && (
+              <input
+                value={orderPrice}
+                onChange={(e) => setOrderPrice(e.target.value)}
+                placeholder={orderType === 'market' ? '총액 (원)' : '주문 가격 (원)'}
+                className="rounded-lg border border-[#1E2536] bg-[#0E1119] px-3 py-2 text-zinc-100"
+                required
+              />
+            )}
+            {(orderType === 'limit' || orderSide === 'SELL') && (
+              <input
+                value={orderVolume}
+                onChange={(e) => setOrderVolume(e.target.value)}
+                placeholder="수량 (코인)"
+                className="rounded-lg border border-[#1E2536] bg-[#0E1119] px-3 py-2 text-zinc-100"
+                required
+              />
+            )}
+            <button
+              type="submit"
+              disabled={orderBusy}
+              className={`rounded-lg px-4 py-2 font-semibold disabled:opacity-50 ${
+                orderSide === 'BUY'
+                  ? 'bg-emerald-500/20 border border-emerald-500/40 text-emerald-300'
+                  : 'bg-rose-500/20 border border-rose-500/40 text-rose-300'
+              }`}
+            >
+              {orderBusy ? '전송 중...' : orderSide === 'BUY' ? '매수 실행' : '매도 실행'}
+            </button>
+          </form>
         </section>
 
         {/* 내 미체결 주문 & 급락 반등 관찰 */}
