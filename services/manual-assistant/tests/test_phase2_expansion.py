@@ -542,3 +542,10 @@ def test_postgres_identity_compat_adapter(tmp_path, monkeypatch):
     assert executed[0][0].startswith("INSERT INTO users VALUES (%s,%s,%s,%s,%s,%s,%s) ON CONFLICT DO NOTHING")
     store.audit_event("pg_audit_test", {"ok": True})
     assert any("INSERT INTO system_events" in sql and "pg_audit_test" in params for sql, params in executed)
+
+    from manual_assistant.analytics_ledger import AnalyticsLedger
+
+    ledger = AnalyticsLedger(store)
+    ledger.recalculate()
+    assert any("DELETE FROM trade_positions" in sql for sql, _ in executed)
+    assert any("SELECT * FROM exchange_fills" in sql for sql, _ in executed)

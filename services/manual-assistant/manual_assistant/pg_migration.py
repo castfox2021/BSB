@@ -406,6 +406,7 @@ def check_pg_connection_and_parity(store, dsn: str | None = None) -> dict:
         "configured": bool(target_dsn),
         "identity_mode": "POSTGRES_IDENTITY" if use_pg else "SQLITE",
         "audit_mode": "POSTGRES_AUDIT" if use_pg else "SQLITE",
+        "analytics_mode": "POSTGRES_ANALYTICS" if use_pg else "SQLITE",
         "driver_available": False,
         "connected": False,
         "pg_version": None,

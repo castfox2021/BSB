@@ -26,6 +26,18 @@ def _d(val, default="0") -> Decimal:
         return D(default)
 
 
+def _dt(val) -> datetime:
+    if isinstance(val, datetime):
+        return val if val.tzinfo else val.replace(tzinfo=UTC)
+    return datetime.fromisoformat(str(val))
+
+
+def _iso(val) -> str:
+    if isinstance(val, datetime):
+        return val.isoformat()
+    return str(val)
+
+
 def _fmt(val: Decimal | None, places: int = 2) -> str | None:
     if val is None:
         return None
@@ -153,16 +165,22 @@ class AnalyticsLedger:
         mkt = market.strip().upper()
         if not mkt.startswith("KRW-"):
             mkt = f"KRW-{mkt}"
-        with self.store.connect() as conn:
+        with self.store.identity_connect() as conn:
             conn.execute(
-                "INSERT OR REPLACE INTO asset_cost_baselines VALUES (?,?,?,?,?,?)",
+                """INSERT INTO asset_cost_baselines (account_id, market, initial_quantity, avg_cost_krw, note, updated_at)
+                VALUES (?,?,?,?,?,?)
+                ON CONFLICT (account_id, market) DO UPDATE SET
+                  initial_quantity=EXCLUDED.initial_quantity,
+                  avg_cost_krw=EXCLUDED.avg_cost_krw,
+                  note=EXCLUDED.note,
+                  updated_at=EXCLUDED.updated_at""",
                 (account_id, mkt, format(qty, "f"), format(cost, "f"), note, now_iso),
             )
         return self.recalculate(account_id)
 
     def resolve_issue(self, issue_id: str, resolution: str = "RESOLVED") -> dict:
         now_iso = datetime.now(UTC).isoformat()
-        with self.store.connect() as conn:
+        with self.store.identity_connect() as conn:
             conn.execute(
                 "UPDATE analytics_reconciliation_issues SET status=?,resolved_at=? WHERE id=?",
                 (resolution, now_iso, issue_id),
@@ -171,7 +189,7 @@ class AnalyticsLedger:
 
     def recalculate(self, account_id: str | None = None) -> dict:
         now_iso = datetime.now(UTC).isoformat()
-        with self.store.connect() as conn:
+        with self.store.identity_connect() as conn:
             conn.execute("DELETE FROM trade_positions")
             conn.execute("DELETE FROM trade_lot_allocations")
             conn.execute(
@@ -289,12 +307,7 @@ class AnalyticsLedger:
                             buy_ref = open_buys[0]["id"] if open_buys else "unknown"
                             hold_secs = max(
                                 0,
-                                int(
-                                    (
-                                        datetime.fromisoformat(f["filled_at"])
-                                        - datetime.fromisoformat(opened_ref)
-                                    ).total_seconds()
-                                ),
+                                int((_dt(f["filled_at"]) - _dt(opened_ref)).total_seconds()),
                             )
                             pos_id = cur_pos_id or uuid.uuid4().hex
                             conn.execute(
@@ -339,7 +352,11 @@ class AnalyticsLedger:
                                     (realized_total / disposed_total) if False else D(0)
                                 )
                                 conn.execute(
-                                    "INSERT INTO trade_positions VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                                    """INSERT INTO trade_positions
+                                    (id, account_id, market, position_source, strategy_name, strategy_version, opened_at, closed_at,
+                                     acquired_quantity, disposed_quantity, remaining_quantity, cost_basis, realized_pnl, realized_pnl_pct,
+                                     fee_total, status, calculation_version)
+                                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                                     (
                                         cur_pos_id,
                                         acc_id,
@@ -366,7 +383,11 @@ class AnalyticsLedger:
 
                 if pool_qty > D("0.00000001") and cur_pos_id:
                     conn.execute(
-                        "INSERT INTO trade_positions VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                        """INSERT INTO trade_positions
+                        (id, account_id, market, position_source, strategy_name, strategy_version, opened_at, closed_at,
+                         acquired_quantity, disposed_quantity, remaining_quantity, cost_basis, realized_pnl, realized_pnl_pct,
+                         fee_total, status, calculation_version)
+                        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                         (
                             cur_pos_id,
                             acc_id,
@@ -412,7 +433,7 @@ class AnalyticsLedger:
         mode_f = str(filters.get("mode") or "LIVE").upper()  # LIVE | PAPER
         account_f = filters.get("account_id")
 
-        with self.store.connect() as conn:
+        with self.store.identity_connect() as conn:
             if mode_f == "PAPER":
                 rows = [
                     dict(r)
@@ -422,7 +443,7 @@ class AnalyticsLedger:
                 ]
                 lots = []
                 for r in rows:
-                    closed_dt = datetime.fromisoformat(r["closed_at"])
+                    closed_dt = _dt(r["closed_at"])
                     if start_utc and closed_dt < start_utc:
                         continue
                     if end_utc and closed_dt > end_utc:
@@ -506,7 +527,9 @@ class AnalyticsLedger:
                     f"{lot_base}{where_sql} ORDER BY {col_prefix}closed_at ASC", tuple(params)
                 ):
                     d = dict(r)
-                    closed_dt = datetime.fromisoformat(d["closed_at"])
+                    d["opened_at"] = _iso(d["opened_at"])
+                    d["closed_at"] = _iso(d["closed_at"])
+                    closed_dt = _dt(d["closed_at"])
                     if start_utc and closed_dt < start_utc:
                         continue
                     if end_utc and closed_dt > end_utc:
