@@ -136,12 +136,20 @@ export default function AdminSettingsPage() {
             <summary className="cursor-pointer font-semibold text-zinc-200">
               PostgreSQL 다중 회원제 마이그레이션 준비 현황
             </summary>
-            <div className="mt-3 flex flex-wrap gap-2 font-mono text-[11px] text-zinc-400">
-              {Object.entries(pgPreview.counts).map(([tbl, cnt]) => (
-                <span key={tbl} className="rounded border border-[#1E2536] bg-[#0E1119] px-2.5 py-1">
-                  {tbl}: {cnt}건
-                </span>
-              ))}
+            <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
+              <div className="flex flex-wrap gap-2 font-mono text-[11px] text-zinc-400">
+                {Object.entries(pgPreview.counts).map(([tbl, cnt]) => (
+                  <span key={tbl} className="rounded border border-[#1E2536] bg-[#0E1119] px-2.5 py-1">
+                    {tbl}: {cnt}건
+                  </span>
+                ))}
+              </div>
+              <a
+                href="/api/manual/admin/pg-migration/export"
+                className="rounded-lg border border-emerald-500/40 bg-emerald-500/15 px-3 py-1.5 font-mono text-[11px] font-semibold text-emerald-300"
+              >
+                이관 SQL 다운로드 (.sql)
+              </a>
             </div>
             <pre className="mt-3 max-h-64 overflow-auto rounded-lg border border-[#1E2536] bg-[#0B0E14] p-3 font-mono text-[11px] text-zinc-400">
               {pgPreview.ddl_preview}

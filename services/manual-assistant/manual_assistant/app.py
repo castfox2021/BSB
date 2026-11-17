@@ -1246,6 +1246,19 @@ def create_app(
             "ddl_preview": generate_pg_ddl(),
         }
 
+    @app.get("/api/admin/pg-migration/export")
+    def export_pg_migration_sql():
+        from .pg_migration import export_sqlite_to_pg_sql
+
+        sql_text, counts = export_sqlite_to_pg_sql(store)
+        with store.connect() as conn:
+            Storage.audit(conn, "pg_migration_exported", {"counts": counts})
+        return Response(
+            content=sql_text.encode("utf-8"),
+            media_type="application/sql; charset=utf-8",
+            headers={"Content-Disposition": 'attachment; filename="bsb-pg-migration.sql"'},
+        )
+
     @app.post("/api/admin/strategy-reports/preview")
     async def preview_strategy_report(request: Request):
         data = await body(request)

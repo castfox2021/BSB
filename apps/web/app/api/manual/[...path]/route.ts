@@ -55,6 +55,7 @@ const routes = new Set([
   'admin/audit-logs',
   'admin/members',
   'admin/pg-migration/preview',
+  'admin/pg-migration/export',
   'admin/strategy-reports',
   'admin/strategy-reports/preview',
   'admin/strategy-comparisons',
