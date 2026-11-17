@@ -5,7 +5,7 @@ import logging
 import time
 import uuid
 from datetime import UTC, datetime, timedelta
-from decimal import Decimal, localcontext
+from decimal import ROUND_DOWN, Decimal, localcontext
 
 from .lab import Lab
 from .ledger import decimal_math, decimal_text, rebuild
@@ -66,6 +66,7 @@ class Engine:
         self.private_guard = lambda: []
         self.private_sync = None
         self.pending_auto_buys = []
+        self.pending_limit_cancels = []
         from .reversion import ReversionLab
 
         self.reversion = ReversionLab(store, market)
@@ -741,19 +742,41 @@ class Engine:
                             },
                         )
                     continue
-                logger.warning("auto_buy submitting market bid for %s: %s KRW", symbol, order_krw)
-                result = await OrderTransport(client).submit(
-                    {
+                quote = self.market.quote(symbol) if hasattr(self.market, "quote") else None
+                bid1 = D(str(quote["bids"][0][0])) if quote and quote.get("bids") else None
+                if bid1 and bid1 > 0:
+                    vol = (D(order_krw) / bid1).quantize(D("0.00000001"), rounding=ROUND_DOWN)
+                    vol_text = format(vol, "f").rstrip("0").rstrip(".") or "0"
+                    price_text = format(bid1, "f").rstrip("0").rstrip(".") if "." in format(bid1, "f") else format(bid1, "f")
+                    params = {
+                        "market": symbol,
+                        "side": "bid",
+                        "order_type": "limit",
+                        "volume": vol_text,
+                        "price": price_text,
+                        "client_order_id": f"bsb-ab-{uuid.uuid4().hex[:16]}",
+                    }
+                    logger.warning(
+                        "auto_buy submitting limit bid (매수1호가) for %s: price=%s, volume=%s (~%s KRW)",
+                        symbol,
+                        price_text,
+                        vol_text,
+                        order_krw,
+                    )
+                else:
+                    params = {
                         "market": symbol,
                         "side": "bid",
                         "order_type": "price",
                         "price": str(order_krw),
                         "client_order_id": f"bsb-ab-{uuid.uuid4().hex[:16]}",
-                    },
-                    authorize=lambda: None,
-                )
+                    }
+                    logger.warning("auto_buy submitting market bid (no quote) for %s: %s KRW", symbol, order_krw)
+                result = await OrderTransport(client).submit(params, authorize=lambda: None)
                 order_uuid = result if isinstance(result, str) else result.get("uuid")
-                logger.warning("auto_buy submitted for %s: uuid=%s", symbol, order_uuid)
+                if params["order_type"] == "limit" and order_uuid:
+                    self.pending_limit_cancels.append((time.monotonic() + 20.0, symbol, order_uuid))
+                logger.warning("auto_buy submitted for %s: uuid=%s (%s)", symbol, order_uuid, params["order_type"])
                 with self.store.connect() as conn:
                     self.store.audit(
                         conn,
@@ -761,7 +784,9 @@ class Engine:
                         {
                             "symbol": symbol,
                             "version_id": version_id,
-                            "price": str(order_krw),
+                            "order_type": params["order_type"],
+                            "price": params["price"],
+                            "volume": params.get("volume"),
                             "uuid": order_uuid,
                         },
                     )
@@ -774,11 +799,48 @@ class Engine:
                         {"symbol": symbol, "error": type(error).__name__, "detail": str(error)[:200]},
                     )
 
+    async def _process_limit_cancels(self):
+        if not self.pending_limit_cancels:
+            return
+        client = getattr(self.private_sync, "client", None)
+        if not client or getattr(self.private_sync, "credentials", None) is None:
+            self.pending_limit_cancels.clear()
+            return
+        from .manual_orders import OrderTransport
+
+        now_mono = time.monotonic()
+        still_waiting = []
+        for cancel_at, symbol, order_uuid in self.pending_limit_cancels:
+            if now_mono < cancel_at:
+                still_waiting.append((cancel_at, symbol, order_uuid))
+                continue
+            try:
+                order = await client.get("/v1/order", {"uuid": order_uuid})
+                if order.get("state") == "wait":
+                    status, body = await OrderTransport(client).cancel(order_uuid)
+                    logger.warning(
+                        "auto_buy limit order canceled after 20s timeout (%s, uuid=%s): status=%s body=%s",
+                        symbol,
+                        order_uuid,
+                        status,
+                        body,
+                    )
+                    with self.store.connect() as conn:
+                        self.store.audit(
+                            conn,
+                            "auto_buy_limit_canceled",
+                            {"symbol": symbol, "uuid": order_uuid, "status": status},
+                        )
+            except Exception as error:
+                logger.warning("auto_buy limit cancel check failed (%s, uuid=%s): %s", symbol, order_uuid, error)
+        self.pending_limit_cancels = still_waiting
+
     async def run(self):
         while True:
             try:
                 await asyncio.to_thread(self.tick)
                 await self._execute_auto_buys()
+                await self._process_limit_cancels()
                 self.last_tick_at = datetime.now(UTC).isoformat()
                 self.last_error = None
             except Exception as error:

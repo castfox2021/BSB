@@ -40,6 +40,7 @@ class OrderTransport:
         if set(parameters) not in (
             {"market", "side", "order_type", "price", "client_order_id"},
             {"market", "side", "order_type", "volume", "client_order_id"},
+            {"market", "side", "order_type", "volume", "price", "client_order_id"},
         ):
             raise OrderBlocked("주문 필드 오류")
         async with self.client.lock:
@@ -92,6 +93,19 @@ class OrderTransport:
             )
         payload = json.loads(response.text, parse_float=D)
         return identifier(payload.get("order_id", payload.get("uuid")))
+
+    async def cancel(self, order_uuid: str):
+        query = serialize({"uuid": order_uuid})
+        url = httpx_url = BASE + "/v1/order?" + query
+        async with self.client.lock:
+            await asyncio.sleep(max(0, self.client.next_at - time.monotonic()))
+            self.client.next_at = time.monotonic() + 1
+        token = self.client.auth.token(query)
+        response = await self.client.http.delete(
+            httpx_url,
+            headers={"Authorization": "Bearer " + token, "Accept": "application/json"},
+        )
+        return response.status_code, response.text[:200]
 
 
 class ManualOrders:
