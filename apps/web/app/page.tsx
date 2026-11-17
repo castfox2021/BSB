@@ -7,6 +7,7 @@ import ManualFillPanel from './manual-fill-panel';
 import StrategyComparison from './strategy-comparison';
 import StrategyLab from './strategy-lab';
 import AiStrategyReport from './ai-strategy-report';
+import TradingAnalytics from './trading-analytics';
 import TradingWorkspace from './trading-review';
 import FullMarketScanner from './full-market-scanner';
 import PrivateAccount from './private-account';
@@ -18,6 +19,7 @@ const menus = [
   ['board', '조용한 신호판'],
   ['chart', '매매 차트'],
   ['journal', '매매노트'],
+  ['analytics', '거래 분석'],
   ['strategy', '전략 분석'],
   ['settings', '시스템 설정'],
 ];
@@ -291,6 +293,8 @@ export default function Home() {
           {journalTab === 'account' && <PrivateAccount />}
         </div>
       )}
+
+      {tab === 'analytics' && <TradingAnalytics />}
 
       {tab === 'strategy' && (
         <div className="space-y-6">

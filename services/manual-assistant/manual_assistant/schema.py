@@ -79,3 +79,7 @@ def migrate(conn):
     from .report_schema import migrate_reports
 
     migrate_reports(conn)
+
+    from .analytics_schema import migrate_analytics
+
+    migrate_analytics(conn)

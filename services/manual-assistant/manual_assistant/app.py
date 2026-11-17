@@ -20,7 +20,7 @@ from fastapi import (
     WebSocketDisconnect,
 )
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, Response
 from pydantic import BaseModel, ConfigDict, model_validator
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
@@ -175,6 +175,18 @@ def create_app(
             (database_path.parent / "reports") if database_path else (ROOT / "data/reports"),
         )
         app.state.report_builder = report_builder
+        from .analytics_ledger import AnalyticsLedger
+        from .analytics_sync import AnalyticsSyncService
+
+        analytics_env = (
+            database_path.parent / ".analytics.env"
+            if database_path
+            else ROOT / ".analytics.env"
+        )
+        analytics_sync = AnalyticsSyncService(store, private, analytics_env)
+        analytics_ledger = AnalyticsLedger(store, market)
+        app.state.analytics_sync = analytics_sync
+        app.state.analytics_ledger = analytics_ledger
         app.state.orders = ManualOrders(store, market, private, engine)
         private.orders = app.state.orders
         app.state.orders.live_execution_disabled = True
@@ -203,18 +215,21 @@ def create_app(
             evaluator = asyncio.create_task(engine.run())
             order_monitor = asyncio.create_task(app.state.orders.run())
             automation_runner = asyncio.create_task(app.state.automation.run())
+            analytics_task = asyncio.create_task(analytics_sync.run())
             try:
                 yield
             finally:
                 evaluator.cancel()
                 order_monitor.cancel()
                 automation_runner.cancel()
+                analytics_task.cancel()
                 for task in jobs:
                     task.cancel()
                 await asyncio.gather(
                     evaluator,
                     order_monitor,
                     automation_runner,
+                    analytics_task,
                     *jobs,
                     return_exceptions=True,
                 )
@@ -1181,6 +1196,156 @@ def create_app(
     async def compare_strategies(request: Request):
         await body(request)
         return engine().reversion.get_exit_comparison()
+
+    @app.post("/api/analytics/sync")
+    async def analytics_sync_trigger(request: Request):
+        data = await body(request)
+        res = await app.state.analytics_sync.sync_history(
+            start_iso=data.get("start_iso"), end_iso=data.get("end_iso")
+        )
+        app.state.analytics_ledger.recalculate()
+        return res
+
+    @app.get("/api/analytics/sync/status")
+    def analytics_sync_status():
+        return app.state.analytics_sync.status()
+
+    @app.post("/api/analytics/import")
+    async def analytics_import(request: Request):
+        import base64
+
+        data = await body(request)
+        filename = str(data.get("filename") or "import.csv")
+        b64 = str(data.get("content_base64") or "")
+        if not b64:
+            raise HTTPException(status_code=400, detail="파일 내용이 비어 있습니다.")
+        try:
+            raw = base64.b64decode(b64, validate=True)
+            res = app.state.analytics_sync.import_file(
+                filename, raw, preview_only=bool(data.get("preview_only", False))
+            )
+            if not res.get("preview"):
+                app.state.analytics_ledger.recalculate()
+            return res
+        except ValueError as error:
+            raise HTTPException(status_code=400, detail=str(error)) from error
+
+    def _analytics_filters(request: Request) -> dict:
+        q = request.query_params
+        return {
+            "period": q.get("period", "all"),
+            "start_kst": q.get("start_kst"),
+            "end_kst": q.get("end_kst"),
+            "market": q.get("market", "ALL"),
+            "origin": q.get("origin", "ALL"),
+            "strategy": q.get("strategy", "ALL"),
+            "outcome": q.get("outcome", "ALL"),
+            "mode": q.get("mode", "LIVE"),
+        }
+
+    @app.get("/api/analytics/summary")
+    def analytics_summary(request: Request):
+        return app.state.analytics_ledger.query_analytics(_analytics_filters(request))
+
+    @app.get("/api/analytics/trades")
+    def analytics_trades(request: Request, page: int = 1, page_size: int = 50):
+        data = app.state.analytics_ledger.query_analytics(_analytics_filters(request))
+        items = data["trades"]
+        total = len(items)
+        start = max(0, (page - 1) * page_size)
+        return {
+            "items": items[start : start + page_size],
+            "total": total,
+            "page": page,
+            "page_size": page_size,
+        }
+
+    @app.get("/api/analytics/trades/{trade_id}")
+    def analytics_trade_detail(trade_id: str):
+        with store.connect() as conn:
+            lot = conn.execute(
+                "SELECT * FROM trade_lot_allocations WHERE id=?", (trade_id,)
+            ).fetchone()
+            if not lot:
+                raise HTTPException(status_code=404, detail="거래를 찾을 수 없습니다.")
+            d = dict(lot)
+            buy_fill = conn.execute(
+                "SELECT * FROM exchange_fills WHERE id=?", (d["buy_fill_id"],)
+            ).fetchone()
+            sell_fill = conn.execute(
+                "SELECT * FROM exchange_fills WHERE id=?", (d["sell_fill_id"],)
+            ).fetchone()
+        return {
+            "lot": d,
+            "buy_fill": dict(buy_fill) if buy_fill else None,
+            "sell_fill": dict(sell_fill) if sell_fill else None,
+        }
+
+    @app.get("/api/analytics/performance")
+    def analytics_performance(request: Request):
+        return app.state.analytics_ledger.query_analytics(_analytics_filters(request))["charts"]
+
+    @app.get("/api/analytics/strategies")
+    def analytics_strategies(request: Request):
+        data = app.state.analytics_ledger.query_analytics(_analytics_filters(request))
+        return {
+            "by_strategy": data["charts"]["by_strategy"],
+            "by_origin": data["charts"]["by_origin"],
+            "reversion_comparison": engine().reversion.get_exit_comparison(),
+        }
+
+    @app.get("/api/analytics/risk")
+    def analytics_risk(request: Request):
+        data = app.state.analytics_ledger.query_analytics(_analytics_filters(request))
+        return {"summary": data["summary"], "issues": data["issues"]}
+
+    @app.get("/api/analytics/reconciliation")
+    def analytics_reconciliation():
+        with store.connect() as conn:
+            issues = [
+                dict(r)
+                for r in conn.execute(
+                    "SELECT * FROM analytics_reconciliation_issues ORDER BY created_at DESC LIMIT 100"
+                ).fetchall()
+            ]
+        return {"items": issues}
+
+    @app.post("/api/analytics/reconciliation/{issue_id}/resolve")
+    async def analytics_resolve_issue(issue_id: str, request: Request):
+        data = await body(request)
+        return app.state.analytics_ledger.resolve_issue(
+            issue_id, str(data.get("resolution") or "RESOLVED")
+        )
+
+    @app.post("/api/analytics/baseline")
+    async def analytics_set_baseline(request: Request):
+        data = await body(request)
+        try:
+            return app.state.analytics_ledger.set_baseline(
+                str(data.get("account_id") or "default"),
+                str(data.get("market") or ""),
+                str(data.get("initial_quantity") or "0"),
+                str(data.get("avg_cost_krw") or "0"),
+                str(data.get("note") or ""),
+            )
+        except ValueError as error:
+            raise HTTPException(status_code=400, detail=str(error)) from error
+
+    @app.post("/api/analytics/recalculate")
+    async def analytics_recalculate(request: Request):
+        await body(request)
+        return app.state.analytics_ledger.recalculate()
+
+    @app.get("/api/analytics/export")
+    def analytics_export(request: Request, format: str = "csv"):
+        content, media_type, filename = app.state.analytics_ledger.export_data(
+            format, _analytics_filters(request)
+        )
+        return Response(
+            content=content,
+            media_type=media_type,
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
 
     @app.websocket("/ws/stream")
     async def stream(ws: WebSocket):
