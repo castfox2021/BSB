@@ -701,7 +701,8 @@ class Engine:
             if (version_id != "reversion_watch" and version_id != follow_version) or symbol in seen_symbols:
                 continue
             seen_symbols.add(symbol)
-            if self.reversion.config().get("exclude_warning_coins", True) and self.reversion._is_warning_or_suspended(symbol, {}):
+            rev_cfg = self.reversion.config()
+            if self.reversion._is_warning_or_suspended(symbol, {}, rev_cfg):
                 logger.warning("auto_buy skipped (%s): market_warning/delisting excluded", symbol)
                 with self.store.connect() as conn:
                     self.store.audit(conn, "auto_buy_skipped", {"symbol": symbol, "reason": "market_warning"})

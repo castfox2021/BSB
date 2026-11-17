@@ -58,7 +58,8 @@ class ReversionLab:
                     "SELECT value FROM strategy_state WHERE key='reversion_config'"
                 ).fetchone()[0]
             )
-            cfg.setdefault("exclude_warning_coins", True)
+            cfg.setdefault("exclude_warning_coins", False)
+            cfg.setdefault("excluded_symbols", [])
             return cfg
 
     def update_config(self, patch: dict):
@@ -73,7 +74,20 @@ class ReversionLab:
         if cooldown < 60 or cooldown > 86400:
             raise ValueError("쿨다운은 60초 ~ 86400초 사이여야 합니다.")
         merged["cooldown_seconds"] = cooldown
-        merged["exclude_warning_coins"] = bool(merged.get("exclude_warning_coins", True))
+        merged["exclude_warning_coins"] = bool(merged.get("exclude_warning_coins", False))
+        raw_excluded = merged.get("excluded_symbols", [])
+        if isinstance(raw_excluded, str):
+            raw_excluded = [s.strip() for s in raw_excluded.split(",") if s.strip()]
+        normalized = []
+        for s in raw_excluded:
+            sym = str(s).strip().upper()
+            if not sym:
+                continue
+            if not sym.startswith("KRW-"):
+                sym = f"KRW-{sym}"
+            if sym not in normalized:
+                normalized.append(sym)
+        merged["excluded_symbols"] = normalized
         with self.store.connect() as conn:
             conn.execute(
                 "INSERT OR REPLACE INTO strategy_state VALUES('reversion_config',?)",
@@ -81,21 +95,30 @@ class ReversionLab:
             )
         return merged
 
-    def _is_warning_or_suspended(self, symbol, row) -> bool:
+    def _is_warning_or_suspended(self, symbol, row, config=None) -> bool:
+        cfg = config if config is not None else self.config()
+        if symbol in (cfg.get("excluded_symbols") or []):
+            return True
         meta = getattr(self.market, "market_metadata", {}).get(symbol, {})
-        if meta.get("market_warning", "NONE") not in (None, "NONE"):
-            return True
         if meta.get("market_state") not in (None, "ACTIVE", "active"):
-            return True
-        market_event = meta.get("market_event") or {}
-        if isinstance(market_event, dict) and market_event.get("warning") is True:
-            return True
-        if row.get("market_warning") not in (None, "NONE", "UNKNOWN"):
             return True
         if row.get("is_trading_suspended") is True:
             return True
         if row.get("market_state") not in (None, "ACTIVE", "active"):
             return True
+        today_kst = (datetime.now(UTC) + timedelta(hours=9)).date().isoformat()
+        for date_key in ("delisting_date", "end_date", "support_end_date"):
+            val = meta.get(date_key)
+            if isinstance(val, str) and len(val) >= 10 and val[:10] <= today_kst:
+                return True
+        if cfg.get("exclude_warning_coins", False):
+            if meta.get("market_warning", "NONE") not in (None, "NONE"):
+                return True
+            market_event = meta.get("market_event") or {}
+            if isinstance(market_event, dict) and market_event.get("warning") is True:
+                return True
+            if row.get("market_warning") not in (None, "NONE", "UNKNOWN"):
+                return True
         return False
 
     def coin_name(self, symbol):
@@ -802,7 +825,7 @@ class ReversionLab:
             changes = [D(value) for value in raw_changes]
             crashed = self.crash_signal(changes, config)
             if crashed and symbol not in cooldowns and symbol not in open_symbols:
-                if config.get("exclude_warning_coins", True) and self._is_warning_or_suspended(symbol, row):
+                if self._is_warning_or_suspended(symbol, row, config):
                     continue
                 now_mono = time.monotonic()
                 if symbol not in self.watch:

@@ -240,10 +240,16 @@ def test_warning_and_delisting_coins_are_excluded_and_config_updates(tmp_path):
         completed_price_change_3m="-0.04",
         completed_price_change_5m="-0.05",
     )
+    # By default (exclude_warning_coins=False), CAUTION coins (e.g. delisting tomorrow) are allowed today
+    lab.tick()
+    assert "KRW-TEST" in lab.watch
+
+    # Manual today-delisting exclusion or exclude_warning_coins=True excludes it
+    lab.watch.clear()
+    lab.pending_auto_buys.clear()
+    updated = lab.update_config({"drop_1m": "0.025", "excluded_symbols": "TEST"})
+    assert updated["drop_1m"] == "0.025"
+    assert updated["excluded_symbols"] == ["KRW-TEST"]
     lab.tick()
     assert "KRW-TEST" not in lab.watch
     assert not lab.pending_auto_buys
-
-    updated = lab.update_config({"drop_1m": "0.025", "exclude_warning_coins": True})
-    assert updated["drop_1m"] == "0.025"
-    assert updated["exclude_warning_coins"] is True

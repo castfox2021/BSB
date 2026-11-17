@@ -35,6 +35,7 @@ export default function QuietSettings({ board, onSaved }: { board: Board | null;
     drop_5m: string;
     cooldown_seconds: number;
     exclude_warning_coins: boolean;
+    excluded_symbols: string;
   } | null>(null);
   const [revMessage, setRevMessage] = useState('');
   const [revIsError, setRevIsError] = useState(false);
@@ -78,6 +79,7 @@ export default function QuietSettings({ board, onSaved }: { board: Board | null;
       drop_5m?: string;
       cooldown_seconds?: number;
       exclude_warning_coins?: boolean;
+      excluded_symbols?: string[];
     }>('reversion/config')
       .then((c) =>
         setRevConfig({
@@ -86,7 +88,8 @@ export default function QuietSettings({ board, onSaved }: { board: Board | null;
           drop_3m: String(c.drop_3m ?? '0.03'),
           drop_5m: String(c.drop_5m ?? '0.04'),
           cooldown_seconds: Number(c.cooldown_seconds ?? 1800),
-          exclude_warning_coins: Boolean(c.exclude_warning_coins ?? true),
+          exclude_warning_coins: Boolean(c.exclude_warning_coins ?? false),
+          excluded_symbols: (c.excluded_symbols ?? []).join(', '),
         })
       )
       .catch(() => setRevConfig(null));
@@ -215,13 +218,22 @@ export default function QuietSettings({ board, onSaved }: { board: Board | null;
     setRevIsError(false);
     setRevMessage('');
     try {
-      const updated = await api<typeof revConfig>('reversion/config', 'PATCH', {
+      const updated = await api<{
+        drop_1m: string;
+        drop_1m_confirm_3m: string;
+        drop_3m: string;
+        drop_5m: string;
+        cooldown_seconds: number;
+        exclude_warning_coins: boolean;
+        excluded_symbols: string[];
+      }>('reversion/config', 'PATCH', {
         drop_1m: revConfig.drop_1m.trim(),
         drop_1m_confirm_3m: revConfig.drop_1m_confirm_3m.trim(),
         drop_3m: revConfig.drop_3m.trim(),
         drop_5m: revConfig.drop_5m.trim(),
         cooldown_seconds: Number(revConfig.cooldown_seconds),
         exclude_warning_coins: revConfig.exclude_warning_coins,
+        excluded_symbols: revConfig.excluded_symbols,
       });
       setRevConfig({
         drop_1m: String(updated.drop_1m),
@@ -230,6 +242,7 @@ export default function QuietSettings({ board, onSaved }: { board: Board | null;
         drop_5m: String(updated.drop_5m),
         cooldown_seconds: Number(updated.cooldown_seconds),
         exclude_warning_coins: Boolean(updated.exclude_warning_coins),
+        excluded_symbols: (updated.excluded_symbols ?? []).join(', '),
       });
       setRevMessage('급락 반등 포착 기준을 저장했습니다.');
       onSaved();
@@ -367,15 +380,26 @@ export default function QuietSettings({ board, onSaved }: { board: Board | null;
             </label>
           </div>
 
-          <label className="mt-4 flex cursor-pointer items-center gap-2 text-xs text-zinc-300">
-            <input
-              type="checkbox"
-              checked={revConfig.exclude_warning_coins}
-              onChange={(e) => setRevConfig({ ...revConfig, exclude_warning_coins: e.target.checked })}
-              className="h-4 w-4 rounded border-zinc-600 bg-zinc-900 accent-emerald-500"
-            />
-            <span>투자유의 · 상장폐지 예정 종목 자동 제외 (빗썸 market_warning 기준)</span>
-          </label>
+          <div className="mt-4 space-y-3">
+            <label className="block text-xs font-medium text-zinc-300">
+              오늘 상폐 등 수동 제외 종목 (쉼표 구분, 예: TEMCO, KRW-OSMO)
+              <input
+                className={`${input} mt-1.5 block w-full`}
+                placeholder="비워두면 거래정지/당일 상폐만 자동 제외"
+                value={revConfig.excluded_symbols}
+                onChange={(e) => setRevConfig({ ...revConfig, excluded_symbols: e.target.value })}
+              />
+            </label>
+            <label className="flex cursor-pointer items-center gap-2 text-xs text-zinc-300">
+              <input
+                type="checkbox"
+                checked={revConfig.exclude_warning_coins}
+                onChange={(e) => setRevConfig({ ...revConfig, exclude_warning_coins: e.target.checked })}
+                className="h-4 w-4 rounded border-zinc-600 bg-zinc-900 accent-emerald-500"
+              />
+              <span>투자유의(내일 이후 상폐 예정 포함) 종목까지 전체 제외</span>
+            </label>
+          </div>
 
           <div className="mt-5 flex flex-wrap items-center gap-4 border-t border-[#1E2536]/60 pt-4">
             <button
