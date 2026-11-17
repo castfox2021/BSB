@@ -1762,7 +1762,7 @@ def create_app(
                             )
                 orders = await client.get("/v1/orders", {"states[]": "done", "page": 1, "limit": 50, "order_by": "desc"})
                 if isinstance(orders, list):
-                    with store.connect() as conn:
+                    with store.identity_connect() as conn:
                         inserted_fills += _insert_member_exchange_fills(
                             conn, "bithumb", "BITHUMB_API", member_acc, orders
                         )
@@ -1822,7 +1822,7 @@ def create_app(
                         headers={"Authorization": f"Bearer {orders_token}"},
                     )
                     if ores.status_code == 200 and isinstance(ores.json(), list):
-                        with store.connect() as conn:
+                        with store.identity_connect() as conn:
                             inserted_fills += _insert_member_exchange_fills(
                                 conn, "upbit", "UPBIT_API", member_acc, ores.json()
                             )

@@ -504,11 +504,17 @@ def test_postgres_identity_compat_adapter(tmp_path, monkeypatch):
 
         def execute(self, sql, params=()):
             executed.append((sql, tuple(params)))
+            self._last_sql = sql
+            self.description = sql.strip().upper().startswith("SELECT")
 
         def fetchone(self):
+            if "count(*)" in self._last_sql:
+                return {"cnt": 0}
             return None
 
         def fetchall(self):
+            if "count(*)" in self._last_sql:
+                return [{"cnt": 0}]
             return []
 
     class FakePgConn:
@@ -549,3 +555,9 @@ def test_postgres_identity_compat_adapter(tmp_path, monkeypatch):
     ledger.recalculate()
     assert any("DELETE FROM trade_positions" in sql for sql, _ in executed)
     assert any("SELECT * FROM exchange_fills" in sql for sql, _ in executed)
+
+    from manual_assistant.analytics_sync import AnalyticsSyncService
+
+    sync_svc = AnalyticsSyncService(store, None)
+    sync_svc.status()
+    assert any("FROM analytics_sync_jobs" in sql for sql, _ in executed)

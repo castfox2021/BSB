@@ -274,18 +274,29 @@ class AnalyticsSyncService:
 
     def ingest_existing_private_tables(self, conn) -> dict:
         """Unify records already synced by PrivateSync into exchange_orders & exchange_fills."""
-        bot_uuids = self._bot_client_order_ids(conn)
+        with self.store.connect() as sconn:
+            bot_uuids = self._bot_client_order_ids(sconn)
+            last_ord_row = conn.execute(
+                "SELECT max(updated_at) AS mx FROM exchange_orders WHERE data_source='BITHUMB_API'"
+            ).fetchone()
+            last_ord_at = last_ord_row["mx"] if last_ord_row else None
+            ord_rows = (
+                sconn.execute("SELECT * FROM private_orders WHERE updated_at >= ?", (str(last_ord_at),)).fetchall()
+                if last_ord_at
+                else sconn.execute("SELECT * FROM private_orders").fetchall()
+            )
+            last_fill_row = conn.execute(
+                "SELECT max(filled_at) AS mx FROM exchange_fills WHERE data_source='BITHUMB_API'"
+            ).fetchone()
+            last_fill_at = last_fill_row["mx"] if last_fill_row else None
+            fill_rows = (
+                sconn.execute("SELECT * FROM private_fills WHERE filled_at >= ?", (str(last_fill_at),)).fetchall()
+                if last_fill_at
+                else sconn.execute("SELECT * FROM private_fills").fetchall()
+            )
         inserted_orders = 0
         inserted_fills = 0
-        last_ord_at = conn.execute(
-            "SELECT max(updated_at) FROM exchange_orders WHERE data_source='BITHUMB_API'"
-        ).fetchone()[0]
-        ord_cur = (
-            conn.execute("SELECT * FROM private_orders WHERE updated_at >= ?", (last_ord_at,))
-            if last_ord_at
-            else conn.execute("SELECT * FROM private_orders")
-        )
-        for o in ord_cur:
+        for o in ord_rows:
             od = dict(o)
             origin = "BOT" if od["order_id"] in bot_uuids else "MANUAL"
             conn.execute(
@@ -316,15 +327,7 @@ class AnalyticsSyncService:
             )
             inserted_orders += conn.execute("SELECT changes()").fetchone()[0]
 
-        last_fill_at = conn.execute(
-            "SELECT max(filled_at) FROM exchange_fills WHERE data_source='BITHUMB_API'"
-        ).fetchone()[0]
-        fill_cur = (
-            conn.execute("SELECT * FROM private_fills WHERE filled_at >= ?", (last_fill_at,))
-            if last_fill_at
-            else conn.execute("SELECT * FROM private_fills")
-        )
-        for f in fill_cur:
+        for f in fill_rows:
             fd = dict(f)
             origin = "BOT" if fd["order_id"] in bot_uuids else "MANUAL"
             qty = D(str(fd["quantity"]))
@@ -380,7 +383,7 @@ class AnalyticsSyncService:
             )
             client, account_id = self._client()
 
-            with self.store.connect() as conn:
+            with self.store.identity_connect() as conn:
                 conn.execute(
                     "INSERT INTO analytics_sync_jobs VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
                     (
@@ -437,8 +440,9 @@ class AnalyticsSyncService:
                                         "/v1/order", {"uuid": ex_oid}
                                     )
                                     trades = detail.get("trades") or []
-                                    with self.store.connect() as conn:
-                                        bot_uuids = self._bot_client_order_ids(conn)
+                                    with self.store.identity_connect() as conn:
+                                        with self.store.connect() as sconn:
+                                            bot_uuids = self._bot_client_order_ids(sconn)
                                         coid = detail.get("client_order_id")
                                         origin = (
                                             "BOT"
@@ -455,12 +459,17 @@ class AnalyticsSyncService:
                                             else "SELL"
                                         )
                                         conn.execute(
-                                            """INSERT OR REPLACE INTO exchange_orders
+                                            """INSERT INTO exchange_orders
                                             (id,exchange,account_id,exchange_order_id,client_order_id,market,side,order_type,order_price,order_quantity,executed_quantity,remaining_quantity,executed_amount,status,execution_origin,data_source,ordered_at,updated_at,raw_payload)
-                                            VALUES (COALESCE((SELECT id FROM exchange_orders WHERE exchange='bithumb' AND account_id=? AND exchange_order_id=?),?),?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                                            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                                            ON CONFLICT (exchange, account_id, exchange_order_id) DO UPDATE SET
+                                              status=EXCLUDED.status,
+                                              executed_quantity=EXCLUDED.executed_quantity,
+                                              remaining_quantity=EXCLUDED.remaining_quantity,
+                                              executed_amount=EXCLUDED.executed_amount,
+                                              updated_at=EXCLUDED.updated_at,
+                                              raw_payload=EXCLUDED.raw_payload""",
                                             (
-                                                account_id,
-                                                ex_oid,
                                                 uuid.uuid4().hex,
                                                 "bithumb",
                                                 account_id,
@@ -469,7 +478,7 @@ class AnalyticsSyncService:
                                                 detail.get("market", ""),
                                                 side,
                                                 detail.get("ord_type", "UNKNOWN"),
-                                                str(detail.get("price") or ""),
+                                                str(detail["price"]) if detail.get("price") not in (None, "") else None,
                                                 str(detail.get("volume") or "0"),
                                                 str(exec_vol),
                                                 str(detail.get("remaining_volume") or "0"),
@@ -536,7 +545,7 @@ class AnalyticsSyncService:
             else:
                 self.last_error = error_msg
 
-            with self.store.connect() as conn:
+            with self.store.identity_connect() as conn:
                 conn.execute(
                     "UPDATE analytics_sync_jobs SET status=?,records_fetched=?,records_inserted=?,records_updated=?,error_message=?,completed_at=? WHERE id=?",
                     (status, fetched, inserted, updated, error_msg, done_at, job_id),
@@ -706,7 +715,7 @@ class AnalyticsSyncService:
 
     def status(self) -> dict:
         _, account_id = self._client()
-        with self.store.connect() as conn:
+        with self.store.identity_connect() as conn:
             jobs = [
                 dict(r)
                 for r in conn.execute(
@@ -719,10 +728,12 @@ class AnalyticsSyncService:
                     "SELECT id,filename,file_format,total_rows,inserted_rows,duplicate_rows,conflict_rows,status,created_at FROM analytics_import_batches ORDER BY created_at DESC LIMIT 10"
                 ).fetchall()
             ]
-            fill_count = conn.execute("SELECT count(*) FROM exchange_fills").fetchone()[0]
-            issue_count = conn.execute(
-                "SELECT count(*) FROM analytics_reconciliation_issues WHERE status='OPEN'"
-            ).fetchone()[0]
+            fill_row = conn.execute("SELECT count(*) AS cnt FROM exchange_fills").fetchone()
+            fill_count = int(fill_row["cnt"]) if fill_row else 0
+            issue_row = conn.execute(
+                "SELECT count(*) AS cnt FROM analytics_reconciliation_issues WHERE status='OPEN'"
+            ).fetchone()
+            issue_count = int(issue_row["cnt"]) if issue_row else 0
         return {
             "account_id": account_id,
             "api_connected": self._client()[0] is not None,

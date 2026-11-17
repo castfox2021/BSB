@@ -75,12 +75,17 @@ CREATE TABLE IF NOT EXISTS exchange_fills (
   fee_amount NUMERIC(36, 18) NOT NULL DEFAULT 0,
   fee_currency TEXT NOT NULL DEFAULT 'KRW',
   fee_krw_equiv NUMERIC(36, 18) NOT NULL DEFAULT 0,
+  fee_eval_note TEXT,
   execution_origin TEXT NOT NULL DEFAULT 'UNKNOWN',
   data_source TEXT NOT NULL DEFAULT 'BITHUMB_API',
   source_hash TEXT,
   filled_at TIMESTAMPTZ NOT NULL,
   raw_payload JSONB NOT NULL
 );
+ALTER TABLE exchange_fills ADD COLUMN IF NOT EXISTS fee_eval_note TEXT;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_ex_fills_unique_id
+  ON exchange_fills(account_id, exchange_fill_id)
+  WHERE exchange_fill_id IS NOT NULL AND exchange_fill_id <> '';
 
 CREATE TABLE IF NOT EXISTS trade_positions (
   id TEXT PRIMARY KEY,
@@ -176,6 +181,20 @@ CREATE TABLE IF NOT EXISTS reversion_positions (
   exit_reason TEXT,
   opened_at TIMESTAMPTZ NOT NULL,
   closed_at TIMESTAMPTZ
+);
+
+CREATE TABLE IF NOT EXISTS analytics_import_batches (
+  id TEXT PRIMARY KEY,
+  account_id TEXT NOT NULL,
+  filename TEXT NOT NULL,
+  file_format TEXT NOT NULL,
+  total_rows INTEGER NOT NULL,
+  inserted_rows INTEGER NOT NULL,
+  duplicate_rows INTEGER NOT NULL,
+  conflict_rows INTEGER NOT NULL,
+  status TEXT NOT NULL,
+  errors_json JSONB NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS system_events (
