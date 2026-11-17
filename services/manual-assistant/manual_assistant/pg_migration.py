@@ -191,6 +191,52 @@ CREATE TABLE IF NOT EXISTS reversion_positions (
   closed_at TIMESTAMPTZ
 );
 
+CREATE TABLE IF NOT EXISTS position_exit_policy (
+  position_id TEXT PRIMARY KEY,
+  strategy_name TEXT NOT NULL,
+  version TEXT NOT NULL,
+  stop_loss_rate NUMERIC(18, 6) NOT NULL,
+  tp1_rate NUMERIC(18, 6) NOT NULL,
+  tp1_ratio NUMERIC(18, 6) NOT NULL,
+  tp2_rate NUMERIC(18, 6) NOT NULL,
+  tp2_ratio NUMERIC(18, 6) NOT NULL,
+  runner_ratio NUMERIC(18, 6) NOT NULL,
+  trailing_drop NUMERIC(18, 6) NOT NULL,
+  max_hold_seconds INTEGER NOT NULL,
+  peak_price NUMERIC(36, 18) NOT NULL,
+  protective_stop_price NUMERIC(36, 18) NOT NULL,
+  state TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL,
+  updated_at TIMESTAMPTZ NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS position_exit_leg (
+  id TEXT PRIMARY KEY,
+  position_id TEXT NOT NULL,
+  leg_type TEXT NOT NULL,
+  client_order_id TEXT UNIQUE,
+  target_quantity NUMERIC(36, 18) NOT NULL,
+  filled_quantity NUMERIC(36, 18) NOT NULL DEFAULT 0,
+  avg_fill_price NUMERIC(36, 18),
+  realized_pnl NUMERIC(36, 18) NOT NULL DEFAULT 0,
+  fees NUMERIC(36, 18) NOT NULL DEFAULT 0,
+  status TEXT NOT NULL,
+  reason TEXT,
+  created_at TIMESTAMPTZ NOT NULL,
+  updated_at TIMESTAMPTZ NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS position_exit_event (
+  id TEXT PRIMARY KEY,
+  position_id TEXT NOT NULL,
+  event_type TEXT NOT NULL,
+  price NUMERIC(36, 18),
+  quantity NUMERIC(36, 18),
+  reason TEXT,
+  details_json JSONB NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS analytics_import_batches (
   id TEXT PRIMARY KEY,
   account_id TEXT NOT NULL,
@@ -507,11 +553,15 @@ def check_pg_connection_and_parity(store, dsn: str | None = None) -> dict:
 
     pg_tables = (
         "users",
+        "user_sessions",
+        "admin_sessions",
         "user_exchange_credentials",
         "exchange_orders",
         "exchange_fills",
         "trade_positions",
         "trade_lot_allocations",
+        "analytics_sync_jobs",
+        "reversion_positions",
         "system_events",
     )
     try:

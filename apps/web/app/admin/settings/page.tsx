@@ -16,9 +16,14 @@ export default function AdminSettingsPage() {
   const [pgPreview, setPgPreview] = useState<{ counts: Record<string, number>; ddl_preview: string } | null>(null);
   const [pgStatus, setPgStatus] = useState<{
     configured: boolean;
+    identity_mode?: string;
+    audit_mode?: string;
+    analytics_mode?: string;
     driver_available: boolean;
     connected: boolean;
     pg_version?: string | null;
+    sqlite_counts?: Record<string, number>;
+    pg_counts?: Record<string, number>;
     parity_ok: boolean;
     error?: string | null;
   } | null>(null);
@@ -64,7 +69,7 @@ export default function AdminSettingsPage() {
     api<{ counts: Record<string, number>; ddl_preview: string }>('admin/pg-migration/preview')
       .then(setPgPreview)
       .catch(() => {});
-    api<{ configured: boolean; driver_available: boolean; connected: boolean; pg_version?: string | null; parity_ok: boolean; error?: string | null }>('admin/pg-migration/status')
+    api<NonNullable<typeof pgStatus>>('admin/pg-migration/status')
       .then(setPgStatus)
       .catch(() => {});
     api<{ items: { id: string; email: string; role: string; mfa_enabled: boolean; exchanges: string[]; credentials_count: number; created_at: string }[] }>('admin/members')
@@ -246,13 +251,36 @@ export default function AdminSettingsPage() {
             </div>
             {pgMsg && <p className="mt-2 font-mono text-[11px] text-emerald-400">{pgMsg}</p>}
             {pgStatus && (
-              <p className="mt-2 font-mono text-[11px] text-zinc-400">
-                PG 연결:{' '}
-                <span className={pgStatus.connected ? 'text-emerald-400' : 'text-amber-300'}>
-                  {pgStatus.connected ? `연결됨 (${pgStatus.pg_version?.split(' ').slice(0, 2).join(' ')})` : '미연결'}
-                </span>
-                {' · '}정합성: {pgStatus.parity_ok ? '일치' : pgStatus.error ?? '대기'}
-              </p>
+              <div className="mt-3 space-y-2">
+                <p className="font-mono text-[11px] text-zinc-400">
+                  PG 연결:{' '}
+                  <span className={pgStatus.connected ? 'text-emerald-400' : 'text-amber-300'}>
+                    {pgStatus.connected ? `연결됨 (${pgStatus.pg_version?.split(' ').slice(0, 2).join(' ')})` : '미연결'}
+                  </span>
+                  {' · '}모드: {pgStatus.analytics_mode ?? pgStatus.identity_mode ?? 'SQLITE'}
+                  {' · '}정합성: {pgStatus.parity_ok ? '일치' : pgStatus.error ?? '차이 있음'}
+                </p>
+                {pgStatus.connected && pgStatus.pg_counts && (
+                  <div className="flex flex-wrap gap-2 font-mono text-[11px]">
+                    {Object.entries(pgStatus.pg_counts).map(([tbl, pgCnt]) => {
+                      const sqCnt = pgStatus.sqlite_counts?.[tbl] ?? 0;
+                      const match = pgCnt === sqCnt;
+                      return (
+                        <span
+                          key={tbl}
+                          className={`rounded border px-2 py-0.5 ${
+                            match
+                              ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300'
+                              : 'border-amber-500/30 bg-amber-500/10 text-amber-300'
+                          }`}
+                        >
+                          {tbl}: PG {pgCnt} / SQLite {sqCnt}
+                        </span>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
             )}
             <pre className="mt-3 max-h-64 overflow-auto rounded-lg border border-[#1E2536] bg-[#0B0E14] p-3 font-mono text-[11px] text-zinc-400">
               {pgPreview.ddl_preview}
