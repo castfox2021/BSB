@@ -1233,7 +1233,7 @@ def create_app(
     @app.get("/api/admin/members")
     def get_admin_members(limit: int = 100):
         lim = max(1, min(limit, 500))
-        with store.connect() as conn:
+        with store.identity_connect() as conn:
             users = conn.execute(
                 "SELECT id, email, role, mfa_enabled, created_at FROM users ORDER BY created_at DESC LIMIT ?",
                 (lim,),

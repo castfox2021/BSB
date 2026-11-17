@@ -13,6 +13,16 @@ CREATE TABLE IF NOT EXISTS users (
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+CREATE TABLE IF NOT EXISTS user_sessions (
+  token_hash TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL,
+  username TEXT NOT NULL,
+  role TEXT NOT NULL,
+  ip TEXT,
+  expires_at TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS user_exchange_credentials (
   id TEXT PRIMARY KEY,
   user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -391,8 +401,10 @@ def check_pg_connection_and_parity(store, dsn: str | None = None) -> dict:
 
     target_dsn = (dsn or os.environ.get("DATABASE_URL") or "").strip()
     sqlite_counts = inspect_sqlite_counts(store)
+    use_pg = os.environ.get("USE_POSTGRES") == "1" and bool(target_dsn)
     result = {
         "configured": bool(target_dsn),
+        "identity_mode": "POSTGRES_IDENTITY" if use_pg else "SQLITE",
         "driver_available": False,
         "connected": False,
         "pg_version": None,

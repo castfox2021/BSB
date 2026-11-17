@@ -1,14 +1,83 @@
 import json
+import os
+import re
 import sqlite3
 from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 
 
+class _PgCompatCursor:
+    def __init__(self, rows=None, rowcount: int = 0):
+        self._rows = rows or []
+        self.rowcount = rowcount
+
+    def fetchone(self):
+        return self._rows[0] if self._rows else None
+
+    def fetchall(self):
+        return self._rows
+
+
+class _PgCompatConn:
+    """Minimal sqlite3-compatible wrapper around a psycopg connection."""
+
+    def __init__(self, pg_conn):
+        self._conn = pg_conn
+        self._last_changes = 0
+
+    def execute(self, sql: str, params=()):
+        q = sql.strip()
+        if q.upper() == "SELECT CHANGES()":
+            return _PgCompatCursor([(self._last_changes,)], 1)
+        pg_sql = q.replace("?", "%s")
+        if re.match(r"(?i)^INSERT\s+OR\s+IGNORE\s+INTO\s+", pg_sql):
+            pg_sql = re.sub(r"(?i)^INSERT\s+OR\s+IGNORE\s+INTO\s+", "INSERT INTO ", pg_sql, count=1)
+            if "ON CONFLICT" not in pg_sql.upper():
+                pg_sql = pg_sql.rstrip(";") + " ON CONFLICT DO NOTHING"
+        with self._conn.cursor() as cur:
+            cur.execute(pg_sql, params or ())
+            self._last_changes = cur.rowcount or 0
+            if cur.description is not None:
+                rows = cur.fetchall()
+                return _PgCompatCursor(rows, len(rows))
+            return _PgCompatCursor([], self._last_changes)
+
+    def executescript(self, script: str):
+        with self._conn.cursor() as cur:
+            cur.execute(script)
+
+
 class Storage:
     def __init__(self, path: Path):
         self.path = path
         self.market_store = self
+
+    @staticmethod
+    def is_postgres_enabled() -> bool:
+        return os.environ.get("USE_POSTGRES") == "1" and bool(
+            (os.environ.get("DATABASE_URL") or "").strip()
+        )
+
+    @contextmanager
+    def identity_connect(self):
+        if self.is_postgres_enabled():
+            import psycopg  # type: ignore
+            from psycopg.rows import dict_row  # type: ignore
+
+            dsn = (os.environ.get("DATABASE_URL") or "").strip()
+            pg_conn = psycopg.connect(dsn, row_factory=dict_row)
+            try:
+                yield _PgCompatConn(pg_conn)
+                pg_conn.commit()
+            except Exception:
+                pg_conn.rollback()
+                raise
+            finally:
+                pg_conn.close()
+        else:
+            with self.connect() as conn:
+                yield conn
 
     @contextmanager
     def connect(self):

@@ -475,3 +475,62 @@ def test_member_upbit_sync_orders_and_trades_isolation(tmp_path, monkeypatch):
             ).status_code
             == 401
         )
+
+
+def test_postgres_identity_compat_adapter(tmp_path, monkeypatch):
+    import sys
+    import types
+
+    from manual_assistant.storage import Storage
+
+    executed: list[tuple[str, tuple]] = []
+
+    class FakePgCursor:
+        def __init__(self):
+            self.rowcount = 1
+            self.description = None
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def execute(self, sql, params=()):
+            executed.append((sql, tuple(params)))
+
+        def fetchone(self):
+            return None
+
+        def fetchall(self):
+            return []
+
+    class FakePgConn:
+        def cursor(self):
+            return FakePgCursor()
+
+        def commit(self):
+            pass
+
+        def rollback(self):
+            pass
+
+        def close(self):
+            pass
+
+    fake_psycopg = types.ModuleType("psycopg")
+    fake_psycopg.connect = lambda *args, **kwargs: FakePgConn()
+    fake_rows = types.ModuleType("psycopg.rows")
+    fake_rows.dict_row = object()
+    monkeypatch.setitem(sys.modules, "psycopg", fake_psycopg)
+    monkeypatch.setitem(sys.modules, "psycopg.rows", fake_rows)
+    monkeypatch.setenv("USE_POSTGRES", "1")
+    monkeypatch.setenv("DATABASE_URL", "postgresql://bsb_user:test@127.0.0.1:5432/bsb")
+
+    store = Storage(tmp_path / "pg_compat.sqlite3")
+    assert store.is_postgres_enabled() is True
+    with store.identity_connect() as conn:
+        conn.execute("INSERT OR IGNORE INTO users VALUES (?,?,?,?,?,?,?)", ("u1", "a@b.com", "h", "MEMBER", None, False, "now"))
+        changes = conn.execute("SELECT changes()").fetchone()[0]
+    assert changes == 1
+    assert executed[0][0].startswith("INSERT INTO users VALUES (%s,%s,%s,%s,%s,%s,%s) ON CONFLICT DO NOTHING")
