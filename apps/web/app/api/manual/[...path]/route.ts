@@ -52,6 +52,8 @@ const routes = new Set([
   'history/journal',
   'history/private-orders',
   'history/automation',
+  'admin/audit-logs',
+  'admin/pg-migration/preview',
   'admin/strategy-reports',
   'admin/strategy-reports/preview',
   'admin/strategy-comparisons',

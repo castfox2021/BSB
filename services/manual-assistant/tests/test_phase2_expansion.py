@@ -144,3 +144,33 @@ def test_strategy_proposal_preview_never_auto_applies(tmp_path):
         assert body["valid"] is True
         assert body["auto_applied"] is False
         assert body["diffs"][0]["proposed"] == "0.025"
+
+
+def test_admin_audit_logs_rbac_and_pg_migration_preview(tmp_path):
+    app = create_app(tmp_path / "p3.sqlite3", enforce_admin_auth=True)
+    with TestClient(app, base_url=ORIGIN) as client:
+        client.post(
+            "/api/auth/register",
+            headers=HEADERS,
+            json={"email": "mem@example.com", "password": "password123"},
+        )
+        m_tok = client.post(
+            "/api/auth/login",
+            headers=HEADERS,
+            json={"username": "mem@example.com", "password": "password123"},
+        ).json()["token"]
+        # Member must be blocked from admin audit logs & pg preview
+        assert client.get("/api/admin/audit-logs", headers={**HEADERS, "x-bsb-admin-session": m_tok}).status_code == 401
+        assert client.get("/api/admin/pg-migration/preview", headers={**HEADERS, "x-bsb-admin-session": m_tok}).status_code == 401
+
+        # Admin can read audit logs & PG DDL
+        a_tok = client.post(
+            "/api/auth/login",
+            headers=HEADERS,
+            json={"username": "admin", "password": "bsb1234!"},
+        ).json()["token"]
+        a_h = {**HEADERS, "x-bsb-admin-session": a_tok}
+        assert client.get("/api/admin/audit-logs", headers=a_h).status_code == 200
+        pg = client.get("/api/admin/pg-migration/preview", headers=a_h)
+        assert pg.status_code == 200
+        assert "NUMERIC(36, 18)" in pg.json()["ddl_preview"]

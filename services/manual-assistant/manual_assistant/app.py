@@ -1191,6 +1191,33 @@ def create_app(
     def get_exit_comparison():
         return engine().reversion.get_exit_comparison()
 
+    @app.get("/api/admin/audit-logs")
+    def get_admin_audit_logs(limit: int = 50):
+        lim = max(1, min(limit, 200))
+        with store.connect() as conn:
+            rows = [
+                {
+                    "id": r["id"],
+                    "type": r["type"],
+                    "details": json.loads(r["details_json"]),
+                    "created_at": r["created_at"],
+                }
+                for r in conn.execute(
+                    "SELECT id, type, details_json, created_at FROM system_events ORDER BY id DESC LIMIT ?",
+                    (lim,),
+                ).fetchall()
+            ]
+        return {"items": rows}
+
+    @app.get("/api/admin/pg-migration/preview")
+    def get_pg_migration_preview():
+        from .pg_migration import generate_pg_ddl, inspect_sqlite_counts
+
+        return {
+            "counts": inspect_sqlite_counts(store),
+            "ddl_preview": generate_pg_ddl(),
+        }
+
     @app.post("/api/admin/strategy-reports/preview")
     async def preview_strategy_report(request: Request):
         data = await body(request)
@@ -1518,10 +1545,56 @@ def create_app(
         from .private_client import PrivateClient
 
         client = PrivateClient(Credentials(creds_pair[0], creds_pair[1]))
+        member_acc = f"member:{uid}"
+        inserted_fills = 0
         try:
             accounts = await client.get("/v1/accounts")
-            app.state.analytics_ledger.recalculate(f"member:{uid}")
-            return {"synced": True, "accounts_count": len(accounts) if isinstance(accounts, list) else 0}
+            orders = await client.get("/v1/orders", {"states[]": "done", "page": 1, "limit": 50, "order_by": "desc"})
+            if isinstance(orders, list):
+                with store.connect() as conn:
+                    for o in orders:
+                        ex_oid = str(o.get("uuid") or "")
+                        exec_vol = Decimal(str(o.get("executed_volume") or "0"))
+                        if not ex_oid or exec_vol <= 0:
+                            continue
+                        side = "BUY" if str(o.get("side", "")).lower() in ("bid", "buy") else "SELL"
+                        price = Decimal(str(o.get("price") or "0"))
+                        funds = Decimal(str(o.get("executed_funds") or (price * exec_vol)))
+                        fee = Decimal(str(o.get("paid_fee") or "0"))
+                        conn.execute(
+                            """INSERT OR IGNORE INTO exchange_fills
+                            (id,exchange,account_id,exchange_fill_id,exchange_order_id,client_order_id,market,side,fill_price,fill_quantity,fill_amount,fee_amount,fee_currency,fee_krw_equiv,fee_eval_note,execution_origin,data_source,source_hash,filled_at,raw_payload)
+                            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                            (
+                                uuid4().hex,
+                                "bithumb",
+                                member_acc,
+                                ex_oid,
+                                ex_oid,
+                                o.get("client_order_id"),
+                                o.get("market", ""),
+                                side,
+                                str(price if price > 0 else (funds / exec_vol if exec_vol > 0 else 0)),
+                                str(exec_vol),
+                                str(funds),
+                                str(fee),
+                                "KRW",
+                                str(fee),
+                                "member_sync",
+                                "MANUAL",
+                                "BITHUMB_API",
+                                None,
+                                o.get("created_at") or now(),
+                                json.dumps({"uuid": ex_oid}),
+                            ),
+                        )
+                        inserted_fills += conn.execute("SELECT changes()").fetchone()[0]
+            app.state.analytics_ledger.recalculate(member_acc)
+            return {
+                "synced": True,
+                "accounts_count": len(accounts) if isinstance(accounts, list) else 0,
+                "inserted_fills": inserted_fills,
+            }
         finally:
             await client.close()
 
