@@ -60,6 +60,8 @@ export default function MemberDashboardPage() {
   const [byCoin, setByCoin] = useState<CoinStat[]>([]);
   const [memberBalances, setMemberBalances] = useState<MemberBalance[]>([]);
   const [memberTrades, setMemberTrades] = useState<MemberTrade[]>([]);
+  const [openOrders, setOpenOrders] = useState<{ exchange: string; uuid: string; market: string; side: string; price: string; remaining_volume: string; created_at: string }[]>([]);
+  const [watchingItems, setWatchingItems] = useState<{ symbol: string; coin_name: string; drops: string[]; base_bars: number }[]>([]);
   const [activeSessions, setActiveSessions] = useState<{ ip: string; created_at: string; is_current: boolean }[]>([]);
   const [bithumbPrices, setBithumbPrices] = useState<Record<string, number>>({});
   const [upbitPrices, setUpbitPrices] = useState<Record<string, number>>({});
@@ -67,21 +69,24 @@ export default function MemberDashboardPage() {
   const [err, setErr] = useState('');
 
   async function refreshPrices() {
-    const [bt, ut] = await Promise.all([
+    const [bt, ut, strat] = await Promise.all([
       fetch('/api/manual/public/market/tickers?limit=300').then((r) => (r.ok ? r.json() : { items: [] })).catch(() => ({ items: [] })),
       fetch('/api/manual/public/exchanges/tickers?exchange=upbit&limit=200').then((r) => (r.ok ? r.json() : { items: [] })).catch(() => ({ items: [] })),
+      fetch('/api/manual/public/strategies/overview').then((r) => (r.ok ? r.json() : null)).catch(() => null),
     ]);
     setBithumbPrices(parseTickerPrices(bt?.items ?? []));
     setUpbitPrices(parseTickerPrices(ut?.items ?? []));
+    setWatchingItems(strat?.watching_items ?? []);
   }
 
   async function load() {
-    const [s, c, a, bal, tr, sess] = await Promise.all([
+    const [s, c, a, bal, tr, oo, sess] = await Promise.all([
       fetch('/api/manual/auth/session').then((r) => r.json()).catch(() => null),
       fetch('/api/manual/member/credentials').then((r) => (r.ok ? r.json() : { items: [] })).catch(() => ({ items: [] })),
       fetch('/api/manual/member/analytics').then((r) => (r.ok ? r.json() : null)).catch(() => null),
       fetch('/api/manual/member/accounts').then((r) => (r.ok ? r.json() : { items: [] })).catch(() => ({ items: [] })),
       fetch('/api/manual/member/trades?page=1&page_size=20').then((r) => (r.ok ? r.json() : { items: [] })).catch(() => ({ items: [] })),
+      fetch('/api/manual/member/open-orders').then((r) => (r.ok ? r.json() : { items: [] })).catch(() => ({ items: [] })),
       fetch('/api/manual/member/sessions').then((r) => (r.ok ? r.json() : { items: [] })).catch(() => ({ items: [] })),
     ]);
     setSession(s);
@@ -90,6 +95,7 @@ export default function MemberDashboardPage() {
     setByCoin(a?.by_coin ?? []);
     setMemberBalances(bal.items ?? []);
     setMemberTrades(tr.items ?? []);
+    setOpenOrders(oo.items ?? []);
     setActiveSessions(sess.items ?? []);
     await refreshPrices();
   }
@@ -397,6 +403,74 @@ export default function MemberDashboardPage() {
                   })}
                 </tbody>
               </table>
+            </div>
+          )}
+        </section>
+
+        {/* 내 미체결 주문 & 급락 반등 관찰 */}
+        <section className="rounded-xl border border-[#1E2536] bg-[#121620] p-6 text-xs">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <h2 className="text-base font-semibold">내 미체결 주문 현황 (Bithumb · Upbit)</h2>
+              <p className="mt-1 text-zinc-400">연결된 거래소 계정의 대기(wait) 지정가 주문만 읽기 전용으로 조회합니다.</p>
+            </div>
+            <button type="button" onClick={load} className="rounded-lg border border-[#2A344B] bg-[#181E2B] px-3 py-1.5 text-zinc-200">
+              새로고침
+            </button>
+          </div>
+          {openOrders.length === 0 ? (
+            <p className="mt-3 text-zinc-500">현재 대기 중인 미체결 주문이 없습니다.</p>
+          ) : (
+            <div className="mt-3 overflow-x-auto rounded-lg border border-[#1E2536] bg-[#0E1119]">
+              <table className="w-full text-left font-mono text-[11px]">
+                <thead className="border-b border-[#1E2536] text-zinc-400">
+                  <tr>
+                    <th className="px-3 py-2">거래소/마켓</th>
+                    <th className="px-3 py-2">구분</th>
+                    <th className="px-3 py-2 text-right">주문가</th>
+                    <th className="px-3 py-2 text-right">잔여 수량</th>
+                    <th className="px-3 py-2 text-right">주문 시각</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-[#1E2536]/60">
+                  {openOrders.map((o) => (
+                    <tr key={`${o.exchange}-${o.uuid}`}>
+                      <td className="px-3 py-2 text-zinc-200">
+                        <span className="mr-1.5 rounded bg-[#181E2B] px-1.5 py-0.5 text-[10px] text-zinc-400">{o.exchange}</span>
+                        {o.market}
+                      </td>
+                      <td className={`px-3 py-2 font-semibold ${o.side === 'BUY' ? 'text-emerald-400' : 'text-rose-400'}`}>
+                        {o.side === 'BUY' ? '매수' : '매도'}
+                      </td>
+                      <td className="px-3 py-2 text-right text-zinc-200">{Number(o.price).toLocaleString('ko-KR')}원</td>
+                      <td className="px-3 py-2 text-right text-zinc-300">{o.remaining_volume}</td>
+                      <td className="px-3 py-2 text-right text-zinc-500">{o.created_at ? o.created_at.slice(0, 16).replace('T', ' ') : '—'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+          {watchingItems.length > 0 && (
+            <div className="mt-4 border-t border-[#1E2536] pt-4">
+              <p className="mb-2 font-semibold text-zinc-300">실시간 급락 반등 관찰 종목 ({watchingItems.length}종목)</p>
+              <div className="flex flex-wrap gap-2 font-mono text-[11px]">
+                {watchingItems.map((w) => {
+                  const heldMatch = memberBalances.some(
+                    (b) => (b.currency.startsWith('UPBIT:') ? b.currency.slice(6) : b.currency) === w.symbol.replace('KRW-', '') && Number(b.balance) > 0
+                  );
+                  return (
+                    <span
+                      key={w.symbol}
+                      className={`rounded border px-2.5 py-1 ${
+                        heldMatch ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300' : 'border-[#1E2536] bg-[#0E1119] text-zinc-300'
+                      }`}
+                    >
+                      {w.coin_name} ({w.symbol.replace('KRW-', '')}) · 횡보 {w.base_bars}분{heldMatch ? ' · 보유중' : ''}
+                    </span>
+                  );
+                })}
+              </div>
             </div>
           )}
         </section>

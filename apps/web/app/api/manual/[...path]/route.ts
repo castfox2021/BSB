@@ -87,6 +87,7 @@ const routes = new Set([
   'member/sync',
   'member/analytics',
   'member/accounts',
+  'member/open-orders',
   'member/trades',
   'member/export',
   'member/password',

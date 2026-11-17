@@ -337,6 +337,22 @@ def test_member_upbit_sync_orders_and_trades_isolation(tmp_path, monkeypatch):
                         },
                     ],
                 )
+            if url.startswith("https://api.upbit.com/v1/orders/open"):
+                return FakeResponse(
+                    200,
+                    [
+                        {
+                            "uuid": "up-open-1",
+                            "side": "bid",
+                            "ord_type": "limit",
+                            "market": "KRW-ETH",
+                            "price": "4000000",
+                            "volume": "0.1",
+                            "remaining_volume": "0.1",
+                            "created_at": "2026-11-18T06:00:00+09:00",
+                        }
+                    ],
+                )
             return FakeResponse(404, {})
 
     monkeypatch.setattr(httpx, "AsyncClient", FakeAsyncClient)
@@ -396,6 +412,11 @@ def test_member_upbit_sync_orders_and_trades_isolation(tmp_path, monkeypatch):
         # Member B must not see Member A's synced trades or accounts
         assert client.get("/api/member/accounts", headers=h_b).json()["items"] == []
         assert client.get("/api/member/trades", headers=h_b).json()["total"] == 0
+        oo_a = client.get("/api/member/open-orders", headers=h_a).json()["items"]
+        assert len(oo_a) == 1
+        assert oo_a[0]["exchange"] == "UPBIT"
+        assert oo_a[0]["market"] == "KRW-ETH"
+        assert client.get("/api/member/open-orders", headers=h_b).json()["items"] == []
 
         # Member must be blocked from /api/admin/members, Admin can view metadata only
         assert client.get("/api/admin/members", headers=h_a).status_code == 401

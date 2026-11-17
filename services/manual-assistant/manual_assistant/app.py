@@ -1858,6 +1858,75 @@ def create_app(
             {"mode": "LIVE", "period": "all", "account_id": f"member:{uid}"}
         )
 
+    def _normalize_open_order(exchange_name: str, o: dict) -> dict:
+        return {
+            "exchange": exchange_name,
+            "uuid": str(o.get("uuid") or ""),
+            "market": str(o.get("market") or ""),
+            "side": "BUY" if str(o.get("side", "")).lower() in ("bid", "buy") else "SELL",
+            "ord_type": str(o.get("ord_type") or "limit"),
+            "price": str(o.get("price") or "0"),
+            "volume": str(o.get("volume") or "0"),
+            "remaining_volume": str(o.get("remaining_volume") or o.get("volume") or "0"),
+            "created_at": str(o.get("created_at") or ""),
+        }
+
+    @app.get("/api/member/open-orders")
+    async def member_open_orders(request: Request):
+        uid, _ = _current_user(request)
+        bithumb_pair = app.state.identity.get_decrypted_credential(uid, "BITHUMB")
+        upbit_pair = app.state.identity.get_decrypted_credential(uid, "UPBIT")
+        items: list[dict] = []
+        errors: list[str] = []
+
+        if bithumb_pair:
+            from .private_auth import Credentials
+            from .private_client import PrivateClient
+
+            client = PrivateClient(Credentials(bithumb_pair[0], bithumb_pair[1]))
+            try:
+                orders = await client.get("/v1/orders", {"states[]": "wait", "page": 1, "limit": 50, "order_by": "desc"})
+                if isinstance(orders, list):
+                    items.extend(_normalize_open_order("BITHUMB", o) for o in orders if isinstance(o, dict))
+            except Exception as exc:
+                errors.append(f"BITHUMB: {exc}")
+            finally:
+                await client.close()
+
+        if upbit_pair:
+            import hashlib
+            from urllib.parse import urlencode
+
+            import httpx
+            import jwt as pyjwt
+
+            query_string = urlencode([("states[]", "wait"), ("limit", "50"), ("order_by", "desc")])
+            qhash = hashlib.sha512(query_string.encode("utf-8")).hexdigest()
+            token = pyjwt.encode(
+                {
+                    "access_key": upbit_pair[0],
+                    "nonce": str(uuid4()),
+                    "query_hash": qhash,
+                    "query_hash_alg": "SHA512",
+                },
+                upbit_pair[1],
+                algorithm="HS256",
+            )
+            try:
+                async with httpx.AsyncClient(timeout=8, follow_redirects=False, trust_env=False) as uclient:
+                    res = await uclient.get(
+                        f"https://api.upbit.com/v1/orders/open?{query_string}",
+                        headers={"Authorization": f"Bearer {token}"},
+                    )
+                    if res.status_code == 200 and isinstance(res.json(), list):
+                        items.extend(_normalize_open_order("UPBIT", o) for o in res.json() if isinstance(o, dict))
+                    else:
+                        errors.append(f"UPBIT 미체결 조회 실패 (HTTP {res.status_code})")
+            except Exception as exc:
+                errors.append(f"UPBIT: {exc}")
+
+        return {"items": items, "errors": errors}
+
     @app.get("/api/member/trades")
     def member_trades(request: Request, page: int = 1, page_size: int = 20):
         uid, _ = _current_user(request)
