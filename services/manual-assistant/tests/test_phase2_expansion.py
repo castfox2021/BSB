@@ -569,6 +569,7 @@ def test_postgres_identity_compat_adapter(tmp_path, monkeypatch):
 
     ledger = AnalyticsLedger(store)
     ledger.recalculate()
+    assert ledger.query_analytics({"mode": "LIVE", "period": "all"})["summary"]["trade_count"] == 0
     assert any("DELETE FROM trade_positions" in sql for sql, _ in executed)
     assert any("SELECT * FROM exchange_fills" in sql for sql, _ in executed)
 

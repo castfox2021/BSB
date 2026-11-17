@@ -13,6 +13,9 @@ class _PgCompatCursor:
         self._rows = rows or []
         self.rowcount = rowcount
 
+    def __iter__(self):
+        return iter(self._rows)
+
     def fetchone(self):
         return self._rows[0] if self._rows else None
 
