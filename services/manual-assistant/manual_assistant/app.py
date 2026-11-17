@@ -1927,6 +1927,62 @@ def create_app(
 
         return {"items": items, "errors": errors}
 
+    @app.delete("/api/member/open-orders/{exchange}/{order_uuid}")
+    async def member_cancel_open_order(request: Request, exchange: str, order_uuid: str):
+        uid, _ = _current_user(request)
+        ex = exchange.strip().upper()
+        if ex not in ("BITHUMB", "UPBIT"):
+            raise HTTPException(status_code=400, detail="지원하지 않는 거래소입니다.")
+        pair = app.state.identity.get_decrypted_credential(uid, ex)
+        if not pair:
+            raise HTTPException(status_code=404, detail=f"{ex} API 키가 등록되어 있지 않습니다.")
+
+        if ex == "BITHUMB":
+            from .private_auth import Credentials, serialize
+            from .private_client import BASE, PrivateClient
+
+            client = PrivateClient(Credentials(pair[0], pair[1]))
+            try:
+                query = serialize({"uuid": order_uuid})
+                token = client.auth.token(query)
+                res = await client.http.delete(
+                    f"{BASE}/v1/order?{query}",
+                    headers={"Authorization": f"Bearer {token}", "Accept": "application/json"},
+                )
+            finally:
+                await client.close()
+            if not (200 <= res.status_code < 300):
+                raise HTTPException(status_code=400, detail=f"BITHUMB 주문 취소 실패 (HTTP {res.status_code})")
+        else:
+            import hashlib
+            from urllib.parse import urlencode
+
+            import httpx
+            import jwt as pyjwt
+
+            query_string = urlencode([("uuid", order_uuid)])
+            qhash = hashlib.sha512(query_string.encode("utf-8")).hexdigest()
+            token = pyjwt.encode(
+                {
+                    "access_key": pair[0],
+                    "nonce": str(uuid4()),
+                    "query_hash": qhash,
+                    "query_hash_alg": "SHA512",
+                },
+                pair[1],
+                algorithm="HS256",
+            )
+            async with httpx.AsyncClient(timeout=8, follow_redirects=False, trust_env=False) as uclient:
+                res = await uclient.delete(
+                    f"https://api.upbit.com/v1/order?{query_string}",
+                    headers={"Authorization": f"Bearer {token}"},
+                )
+            if not (200 <= res.status_code < 300):
+                raise HTTPException(status_code=400, detail=f"UPBIT 주문 취소 실패 (HTTP {res.status_code})")
+
+        store.audit_event("member_open_order_canceled", {"user_id": uid, "exchange": ex, "uuid": order_uuid})
+        return {"canceled": True, "exchange": ex, "uuid": order_uuid}
+
     @app.get("/api/member/trades")
     def member_trades(
         request: Request, page: int = 1, page_size: int = 20, exchange: str = "ALL", period: str = "all", market: str = "ALL"

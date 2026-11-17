@@ -165,6 +165,21 @@ export default function MemberDashboardPage() {
     setTradesTotal(Number(tr.total ?? (tr.items ?? []).length));
   }
 
+  async function cancelOpenOrder(exchange: string, uuid: string) {
+    setErr('');
+    setMsg('');
+    const res = await fetch(`/api/manual/member/open-orders/${encodeURIComponent(exchange)}/${encodeURIComponent(uuid)}`, {
+      method: 'DELETE',
+    });
+    const d = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      setErr(d.detail || d.error || '주문 취소 실패');
+      return;
+    }
+    setOpenOrders((prev) => prev.filter((o) => !(o.exchange === exchange && o.uuid === uuid)));
+    setMsg(`${exchange} 미체결 주문을 취소했습니다.`);
+  }
+
   async function syncMemberAccount() {
     setErr('');
     setMsg('');
@@ -636,7 +651,7 @@ export default function MemberDashboardPage() {
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div>
               <h2 className="text-base font-semibold">내 미체결 주문 현황 (Bithumb · Upbit)</h2>
-              <p className="mt-1 text-zinc-400">연결된 거래소 계정의 대기(wait) 지정가 주문만 읽기 전용으로 조회합니다.</p>
+              <p className="mt-1 text-zinc-400">연결된 거래소 계정의 대기(wait) 지정가 주문을 조회하고 직접 취소할 수 있습니다.</p>
             </div>
             <button type="button" onClick={() => load()} className="rounded-lg border border-[#2A344B] bg-[#181E2B] px-3 py-1.5 text-zinc-200">
               새로고침
@@ -654,6 +669,7 @@ export default function MemberDashboardPage() {
                     <th className="px-3 py-2 text-right">주문가</th>
                     <th className="px-3 py-2 text-right">잔여 수량</th>
                     <th className="px-3 py-2 text-right">주문 시각</th>
+                    <th className="px-3 py-2 text-right">관리</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-[#1E2536]/60">
@@ -669,6 +685,15 @@ export default function MemberDashboardPage() {
                       <td className="px-3 py-2 text-right text-zinc-200">{Number(o.price).toLocaleString('ko-KR')}원</td>
                       <td className="px-3 py-2 text-right text-zinc-300">{o.remaining_volume}</td>
                       <td className="px-3 py-2 text-right text-zinc-500">{o.created_at ? o.created_at.slice(0, 16).replace('T', ' ') : '—'}</td>
+                      <td className="px-3 py-2 text-right">
+                        <button
+                          type="button"
+                          onClick={() => cancelOpenOrder(o.exchange, o.uuid)}
+                          className="rounded border border-rose-500/40 bg-rose-500/15 px-2 py-0.5 text-[10px] text-rose-300 hover:bg-rose-500/25"
+                        >
+                          취소
+                        </button>
+                      </td>
                     </tr>
                   ))}
                 </tbody>
