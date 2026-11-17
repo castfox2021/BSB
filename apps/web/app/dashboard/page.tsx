@@ -15,20 +15,18 @@ type MemberBalance = {
 type MemberTrade = {
   id: string;
   market: string;
-  side?: string;
-  quantity?: string;
-  entry_price?: string;
-  exit_price?: string;
-  net_pnl_krw?: string;
-  return_pct?: string;
+  allocated_quantity?: string;
+  allocated_cost?: string;
+  allocated_proceeds?: string;
+  realized_pnl?: string;
+  realized_pnl_pct?: string;
   closed_at?: string;
-  status?: string;
 };
 
 type CoinStat = {
   market: string;
-  trade_count: number;
-  realized_pnl_krw: string;
+  trades: number;
+  pnl_krw: string;
   win_rate?: string | null;
 };
 
@@ -65,6 +63,7 @@ export default function MemberDashboardPage() {
   const [activeSessions, setActiveSessions] = useState<{ ip: string; created_at: string; is_current: boolean }[]>([]);
   const [bithumbPrices, setBithumbPrices] = useState<Record<string, number>>({});
   const [upbitPrices, setUpbitPrices] = useState<Record<string, number>>({});
+  const [exFilter, setExFilter] = useState<'ALL' | 'BITHUMB' | 'UPBIT'>('ALL');
   const [msg, setMsg] = useState('');
   const [err, setErr] = useState('');
 
@@ -92,7 +91,7 @@ export default function MemberDashboardPage() {
     setSession(s);
     setCreds(c.items ?? []);
     if (a?.summary) setMemberSummary(a.summary);
-    setByCoin(a?.by_coin ?? []);
+    setByCoin(a?.charts?.by_market ?? []);
     setMemberBalances(bal.items ?? []);
     setMemberTrades(tr.items ?? []);
     setOpenOrders(oo.items ?? []);
@@ -256,10 +255,17 @@ export default function MemberDashboardPage() {
     setMsg('비밀번호가 변경되었습니다.');
   }
 
+  const visibleBalances = memberBalances.filter((b) => {
+    if (exFilter === 'ALL') return true;
+    const isUpbit = b.currency.startsWith('UPBIT:');
+    return exFilter === 'UPBIT' ? isUpbit : !isUpbit;
+  });
+  const visibleOpenOrders = openOrders.filter((o) => exFilter === 'ALL' || o.exchange === exFilter);
+
   let totalEvalKrw = 0;
   let totalUnrealizedKrw = 0;
   let hasUnrealized = false;
-  for (const b of memberBalances) {
+  for (const b of visibleBalances) {
     const isUpbit = b.currency.startsWith('UPBIT:');
     const sym = isUpbit ? b.currency.slice(6) : b.currency;
     const qty = Number(b.balance) + Number(b.locked ?? 0);
@@ -310,9 +316,23 @@ export default function MemberDashboardPage() {
               <h2 className="text-base font-semibold">내 개인 거래 통계</h2>
               <p className="mt-1 text-zinc-400">회원 본인의 암호화 API 키로만 조회되며 타 회원·운영자 데이터와 완전히 격리됩니다.</p>
             </div>
-            <button type="button" onClick={syncMemberAccount} className="rounded-lg border border-emerald-500/40 bg-emerald-500/15 px-3.5 py-2 font-semibold text-emerald-300">
-              내 계좌 동기화
-            </button>
+            <div className="flex flex-wrap items-center gap-2">
+              {(['ALL', 'BITHUMB', 'UPBIT'] as const).map((ex) => (
+                <button
+                  key={ex}
+                  type="button"
+                  onClick={() => setExFilter(ex)}
+                  className={`rounded-lg px-2.5 py-1.5 font-mono text-[11px] font-semibold ${
+                    exFilter === ex ? 'bg-zinc-100 text-zinc-950' : 'border border-[#1E2536] bg-[#0E1119] text-zinc-400'
+                  }`}
+                >
+                  {ex === 'ALL' ? '전체' : ex}
+                </button>
+              ))}
+              <button type="button" onClick={syncMemberAccount} className="rounded-lg border border-emerald-500/40 bg-emerald-500/15 px-3.5 py-2 font-semibold text-emerald-300">
+                내 계좌 동기화
+              </button>
+            </div>
           </div>
           <div className="mt-4 grid grid-cols-2 gap-3 font-mono sm:grid-cols-5">
             <div className="rounded-lg border border-[#1E2536] bg-[#0E1119] p-3">
@@ -341,10 +361,10 @@ export default function MemberDashboardPage() {
           {byCoin.length > 0 && (
             <div className="mt-3 flex flex-wrap gap-2 font-mono text-[11px]">
               {byCoin.slice(0, 8).map((c) => {
-                const pnl = Number(c.realized_pnl_krw ?? 0);
+                const pnl = Number(c.pnl_krw ?? 0);
                 return (
                   <span key={c.market} className="rounded border border-[#1E2536] bg-[#0E1119] px-2.5 py-1 text-zinc-300">
-                    {c.market.replace('KRW-', '')} ({c.trade_count}건){' '}
+                    {c.market.replace('KRW-', '')} ({c.trades}건){' '}
                     <span className={pnl >= 0 ? 'text-emerald-400' : 'text-rose-400'}>
                       {pnl >= 0 ? '+' : ''}{Math.round(pnl).toLocaleString('ko-KR')}원
                     </span>
@@ -353,7 +373,7 @@ export default function MemberDashboardPage() {
               })}
             </div>
           )}
-          {memberBalances.length > 0 && (
+          {visibleBalances.length > 0 && (
             <div className="mt-4 overflow-x-auto rounded-lg border border-[#1E2536] bg-[#0E1119]">
               <table className="w-full text-left font-mono text-[11px]">
                 <thead className="border-b border-[#1E2536] text-zinc-400">
@@ -366,7 +386,7 @@ export default function MemberDashboardPage() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-[#1E2536]/60">
-                  {memberBalances.map((b) => {
+                  {visibleBalances.map((b) => {
                     const isUpbit = b.currency.startsWith('UPBIT:');
                     const sym = isUpbit ? b.currency.slice(6) : b.currency;
                     const qty = Number(b.balance) + Number(b.locked ?? 0);
@@ -418,7 +438,7 @@ export default function MemberDashboardPage() {
               새로고침
             </button>
           </div>
-          {openOrders.length === 0 ? (
+          {visibleOpenOrders.length === 0 ? (
             <p className="mt-3 text-zinc-500">현재 대기 중인 미체결 주문이 없습니다.</p>
           ) : (
             <div className="mt-3 overflow-x-auto rounded-lg border border-[#1E2536] bg-[#0E1119]">
@@ -433,7 +453,7 @@ export default function MemberDashboardPage() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-[#1E2536]/60">
-                  {openOrders.map((o) => (
+                  {visibleOpenOrders.map((o) => (
                     <tr key={`${o.exchange}-${o.uuid}`}>
                       <td className="px-3 py-2 text-zinc-200">
                         <span className="mr-1.5 rounded bg-[#181E2B] px-1.5 py-0.5 text-[10px] text-zinc-400">{o.exchange}</span>
@@ -512,15 +532,18 @@ export default function MemberDashboardPage() {
                 </thead>
                 <tbody className="divide-y divide-[#1E2536]/60">
                   {memberTrades.map((t) => {
-                    const pnl = Number(t.net_pnl_krw ?? 0);
+                    const qty = Number(t.allocated_quantity ?? 0);
+                    const entryP = qty > 0 && t.allocated_cost ? Number(t.allocated_cost) / qty : 0;
+                    const exitP = qty > 0 && t.allocated_proceeds ? Number(t.allocated_proceeds) / qty : 0;
+                    const pnl = Number(t.realized_pnl ?? 0);
                     return (
                       <tr key={t.id}>
                         <td className="px-3 py-2 text-zinc-200">{t.market}</td>
-                        <td className="px-3 py-2 text-right text-zinc-300">{t.quantity ?? '—'}</td>
-                        <td className="px-3 py-2 text-right text-zinc-400">{t.entry_price ? `${Number(t.entry_price).toLocaleString('ko-KR')}원` : '—'}</td>
-                        <td className="px-3 py-2 text-right text-zinc-300">{t.exit_price ? `${Number(t.exit_price).toLocaleString('ko-KR')}원` : '—'}</td>
+                        <td className="px-3 py-2 text-right text-zinc-300">{t.allocated_quantity ?? '—'}</td>
+                        <td className="px-3 py-2 text-right text-zinc-400">{entryP > 0 ? `${Math.round(entryP).toLocaleString('ko-KR')}원` : '—'}</td>
+                        <td className="px-3 py-2 text-right text-zinc-300">{exitP > 0 ? `${Math.round(exitP).toLocaleString('ko-KR')}원` : '—'}</td>
                         <td className={`px-3 py-2 text-right font-semibold ${pnl >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-                          {t.net_pnl_krw != null ? `${pnl >= 0 ? '+' : ''}${Math.round(pnl).toLocaleString('ko-KR')}원` : '—'}
+                          {t.realized_pnl != null ? `${pnl >= 0 ? '+' : ''}${Math.round(pnl).toLocaleString('ko-KR')}원` : '—'}
                         </td>
                         <td className="px-3 py-2 text-right text-zinc-500">{t.closed_at ? t.closed_at.slice(0, 16).replace('T', ' ') : '—'}</td>
                       </tr>
