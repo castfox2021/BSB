@@ -230,3 +230,20 @@ def test_drop_base_rebound_requires_consolidation_before_entry(tmp_path):
         assert len(rows) == 5
         # Verify structure low is at or below the base low
         assert all(D(r["structure_low"]) <= D("90") for r in rows)
+
+
+def test_warning_and_delisting_coins_are_excluded_and_config_updates(tmp_path):
+    store, market, lab = setup(tmp_path)
+    market.market_metadata = {"KRW-TEST": {"market_warning": "CAUTION", "market_state": "ACTIVE"}}
+    market.rows[0].update(
+        completed_price_change_1m="-0.03",
+        completed_price_change_3m="-0.04",
+        completed_price_change_5m="-0.05",
+    )
+    lab.tick()
+    assert "KRW-TEST" not in lab.watch
+    assert not lab.pending_auto_buys
+
+    updated = lab.update_config({"drop_1m": "0.025", "exclude_warning_coins": True})
+    assert updated["drop_1m"] == "0.025"
+    assert updated["exclude_warning_coins"] is True

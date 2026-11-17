@@ -53,11 +53,50 @@ class ReversionLab:
 
     def config(self):
         with self.store.connect() as conn:
-            return json.loads(
+            cfg = json.loads(
                 conn.execute(
                     "SELECT value FROM strategy_state WHERE key='reversion_config'"
                 ).fetchone()[0]
             )
+            cfg.setdefault("exclude_warning_coins", True)
+            return cfg
+
+    def update_config(self, patch: dict):
+        current = self.config()
+        merged = {**current, **patch}
+        for key in ("drop_1m", "drop_3m", "drop_5m", "drop_1m_confirm_3m"):
+            val = D(str(merged[key]))
+            if val < D("0.003") or val > D("0.5"):
+                raise ValueError(f"{key} 범위는 0.003 ~ 0.5 사이여야 합니다.")
+            merged[key] = str(val)
+        cooldown = int(merged.get("cooldown_seconds", 1800))
+        if cooldown < 60 or cooldown > 86400:
+            raise ValueError("쿨다운은 60초 ~ 86400초 사이여야 합니다.")
+        merged["cooldown_seconds"] = cooldown
+        merged["exclude_warning_coins"] = bool(merged.get("exclude_warning_coins", True))
+        with self.store.connect() as conn:
+            conn.execute(
+                "INSERT OR REPLACE INTO strategy_state VALUES('reversion_config',?)",
+                (json.dumps(merged),),
+            )
+        return merged
+
+    def _is_warning_or_suspended(self, symbol, row) -> bool:
+        meta = getattr(self.market, "market_metadata", {}).get(symbol, {})
+        if meta.get("market_warning", "NONE") not in (None, "NONE"):
+            return True
+        if meta.get("market_state") not in (None, "ACTIVE", "active"):
+            return True
+        market_event = meta.get("market_event") or {}
+        if isinstance(market_event, dict) and market_event.get("warning") is True:
+            return True
+        if row.get("market_warning") not in (None, "NONE", "UNKNOWN"):
+            return True
+        if row.get("is_trading_suspended") is True:
+            return True
+        if row.get("market_state") not in (None, "ACTIVE", "active"):
+            return True
+        return False
 
     def coin_name(self, symbol):
         return (
@@ -763,6 +802,8 @@ class ReversionLab:
             changes = [D(value) for value in raw_changes]
             crashed = self.crash_signal(changes, config)
             if crashed and symbol not in cooldowns and symbol not in open_symbols:
+                if config.get("exclude_warning_coins", True) and self._is_warning_or_suspended(symbol, row):
+                    continue
                 now_mono = time.monotonic()
                 if symbol not in self.watch:
                     self.watch[symbol] = {

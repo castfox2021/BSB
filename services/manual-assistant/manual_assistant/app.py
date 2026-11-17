@@ -1099,6 +1099,18 @@ def create_app(
             store.audit(conn, "user_paused_live_signals", {})
         return {"active_version": None}
 
+    @app.get("/api/reversion/config")
+    def get_reversion_config():
+        return engine().reversion.config()
+
+    @app.patch("/api/reversion/config")
+    async def patch_reversion_config(request: Request):
+        data = await body(request)
+        try:
+            return engine().reversion.update_config(data)
+        except (ValueError, InvalidOperation) as error:
+            raise HTTPException(status_code=400, detail=str(error)) from error
+
     @app.get("/api/trading/exit-policy")
     def get_exit_policy():
         return engine().reversion.exit_policy()
