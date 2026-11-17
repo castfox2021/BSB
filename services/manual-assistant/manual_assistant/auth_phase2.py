@@ -205,6 +205,33 @@ class Phase2IdentityService:
         with self.store.connect() as conn:
             conn.execute("DELETE FROM user_sessions WHERE token_hash=?", (th,))
 
+    def list_active_sessions(self, user_id: str, current_raw_token: str | None) -> list[dict]:
+        cur_th = hashlib.sha256(current_raw_token.encode("utf-8")).hexdigest() if current_raw_token else ""
+        now_iso = datetime.now(UTC).isoformat()
+        with self.store.connect() as conn:
+            rows = conn.execute(
+                "SELECT token_hash, ip, created_at, expires_at FROM user_sessions WHERE user_id=? AND expires_at > ? ORDER BY created_at DESC",
+                (user_id, now_iso),
+            ).fetchall()
+        return [
+            {
+                "ip": r["ip"] or "unknown",
+                "created_at": r["created_at"],
+                "expires_at": r["expires_at"],
+                "is_current": r["token_hash"] == cur_th,
+            }
+            for r in rows
+        ]
+
+    def revoke_other_sessions(self, user_id: str, current_raw_token: str | None) -> int:
+        cur_th = hashlib.sha256(current_raw_token.encode("utf-8")).hexdigest() if current_raw_token else ""
+        with self.store.connect() as conn:
+            conn.execute(
+                "DELETE FROM user_sessions WHERE user_id=? AND token_hash != ?",
+                (user_id, cur_th),
+            )
+            return conn.execute("SELECT changes()").fetchone()[0]
+
     def setup_mfa(self, user_id: str) -> dict:
         secret = generate_totp_secret()
         with self.store.connect() as conn:

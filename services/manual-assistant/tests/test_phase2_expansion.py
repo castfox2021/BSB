@@ -360,11 +360,18 @@ def test_member_upbit_sync_orders_and_trades_isolation(tmp_path, monkeypatch):
             ).status_code
             == 401
         )
-        assert (
-            client.post(
-                "/api/auth/login",
-                headers=HEADERS,
-                json={"username": "upA@example.com", "password": "newpassword123"},
-            ).status_code
-            == 200
+        tok_a2 = client.post(
+            "/api/auth/login",
+            headers=HEADERS,
+            json={"username": "upA@example.com", "password": "newpassword123"},
         )
+        assert tok_a2.status_code == 200
+        h_a2 = {**HEADERS, "x-bsb-admin-session": tok_a2.json()["token"]}
+        sess_list = client.get("/api/member/sessions", headers=h_a2).json()["items"]
+        assert len(sess_list) >= 2
+        assert any(s["is_current"] for s in sess_list)
+        rev = client.post("/api/member/sessions/revoke-others", headers=h_a2, json={})
+        assert rev.status_code == 200
+        assert rev.json()["revoked"] >= 1
+        assert client.get("/api/member/sessions", headers=h_a).status_code == 401
+        assert client.get("/api/member/sessions", headers=h_a2).status_code == 200

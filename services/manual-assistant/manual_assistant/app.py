@@ -1623,6 +1623,7 @@ def create_app(
         member_acc = f"member:{uid}"
         inserted_fills = 0
         accounts_count = 0
+        sync_errors: list[str] = []
         with store.connect() as conn:
             conn.execute("DELETE FROM private_accounts WHERE account_id=?", (member_acc,))
 
@@ -1655,6 +1656,8 @@ def create_app(
                         inserted_fills += _insert_member_exchange_fills(
                             conn, "bithumb", "BITHUMB_API", member_acc, orders
                         )
+            except Exception as exc:
+                sync_errors.append(f"BITHUMB: {exc}")
             finally:
                 await client.close()
 
@@ -1679,43 +1682,51 @@ def create_app(
                 upbit_pair[1],
                 algorithm="HS256",
             )
-            async with httpx.AsyncClient(timeout=8, follow_redirects=False, trust_env=False) as uclient:
-                ures = await uclient.get(
-                    "https://api.upbit.com/v1/accounts",
-                    headers={"Authorization": f"Bearer {up_token}"},
-                )
-                if ures.status_code == 200 and isinstance(ures.json(), list):
-                    u_accounts = ures.json()
-                    accounts_count += len(u_accounts)
-                    with store.connect() as conn:
-                        for acc in u_accounts:
-                            conn.execute(
-                                "INSERT OR REPLACE INTO private_accounts VALUES (?,?,?,?,?,?,?)",
-                                (
-                                    member_acc,
-                                    f"UPBIT:{acc.get('currency', '')}",
-                                    str(acc.get("balance") or "0"),
-                                    str(acc.get("locked") or "0"),
-                                    str(acc.get("avg_buy_price") or "0"),
-                                    str(acc.get("unit_currency") or "KRW"),
-                                    now(),
-                                ),
+            try:
+                async with httpx.AsyncClient(timeout=8, follow_redirects=False, trust_env=False) as uclient:
+                    ures = await uclient.get(
+                        "https://api.upbit.com/v1/accounts",
+                        headers={"Authorization": f"Bearer {up_token}"},
+                    )
+                    if ures.status_code == 200 and isinstance(ures.json(), list):
+                        u_accounts = ures.json()
+                        accounts_count += len(u_accounts)
+                        with store.connect() as conn:
+                            for acc in u_accounts:
+                                conn.execute(
+                                    "INSERT OR REPLACE INTO private_accounts VALUES (?,?,?,?,?,?,?)",
+                                    (
+                                        member_acc,
+                                        f"UPBIT:{acc.get('currency', '')}",
+                                        str(acc.get("balance") or "0"),
+                                        str(acc.get("locked") or "0"),
+                                        str(acc.get("avg_buy_price") or "0"),
+                                        str(acc.get("unit_currency") or "KRW"),
+                                        now(),
+                                    ),
+                                )
+                    else:
+                        sync_errors.append(f"UPBIT 잔고 조회 실패 (HTTP {ures.status_code})")
+                    ores = await uclient.get(
+                        f"https://api.upbit.com/v1/orders/closed?{query_string}",
+                        headers={"Authorization": f"Bearer {orders_token}"},
+                    )
+                    if ores.status_code == 200 and isinstance(ores.json(), list):
+                        with store.connect() as conn:
+                            inserted_fills += _insert_member_exchange_fills(
+                                conn, "upbit", "UPBIT_API", member_acc, ores.json()
                             )
-                ores = await uclient.get(
-                    f"https://api.upbit.com/v1/orders/closed?{query_string}",
-                    headers={"Authorization": f"Bearer {orders_token}"},
-                )
-                if ores.status_code == 200 and isinstance(ores.json(), list):
-                    with store.connect() as conn:
-                        inserted_fills += _insert_member_exchange_fills(
-                            conn, "upbit", "UPBIT_API", member_acc, ores.json()
-                        )
+                    else:
+                        sync_errors.append(f"UPBIT 주문 조회 실패 (HTTP {ores.status_code})")
+            except Exception as exc:
+                sync_errors.append(f"UPBIT: {exc}")
 
         app.state.analytics_ledger.recalculate(member_acc)
         return {
             "synced": True,
             "accounts_count": accounts_count,
             "inserted_fills": inserted_fills,
+            "errors": sync_errors,
         }
 
     @app.get("/api/member/analytics")
@@ -1772,6 +1783,20 @@ def create_app(
         with store.connect() as conn:
             Storage.audit(conn, "member_password_changed", {"user_id": uid})
         return {"changed": True}
+
+    @app.get("/api/member/sessions")
+    def member_sessions(request: Request):
+        uid, _ = _current_user(request)
+        token = request.headers.get("x-bsb-admin-session") or request.cookies.get("bsb_session")
+        return {"items": app.state.identity.list_active_sessions(uid, token)}
+
+    @app.post("/api/member/sessions/revoke-others")
+    async def member_revoke_other_sessions(request: Request):
+        await body(request)
+        uid, _ = _current_user(request)
+        token = request.headers.get("x-bsb-admin-session") or request.cookies.get("bsb_session")
+        revoked = app.state.identity.revoke_other_sessions(uid, token)
+        return {"revoked": revoked}
 
     @app.get("/api/member/accounts")
     def member_accounts(request: Request):

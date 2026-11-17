@@ -58,6 +58,7 @@ export default function MemberDashboardPage() {
   const [byCoin, setByCoin] = useState<CoinStat[]>([]);
   const [memberBalances, setMemberBalances] = useState<MemberBalance[]>([]);
   const [memberTrades, setMemberTrades] = useState<MemberTrade[]>([]);
+  const [activeSessions, setActiveSessions] = useState<{ ip: string; created_at: string; is_current: boolean }[]>([]);
   const [bithumbPrices, setBithumbPrices] = useState<Record<string, number>>({});
   const [upbitPrices, setUpbitPrices] = useState<Record<string, number>>({});
   const [msg, setMsg] = useState('');
@@ -73,12 +74,13 @@ export default function MemberDashboardPage() {
   }
 
   async function load() {
-    const [s, c, a, bal, tr] = await Promise.all([
+    const [s, c, a, bal, tr, sess] = await Promise.all([
       fetch('/api/manual/auth/session').then((r) => r.json()).catch(() => null),
       fetch('/api/manual/member/credentials').then((r) => (r.ok ? r.json() : { items: [] })).catch(() => ({ items: [] })),
       fetch('/api/manual/member/analytics').then((r) => (r.ok ? r.json() : null)).catch(() => null),
       fetch('/api/manual/member/accounts').then((r) => (r.ok ? r.json() : { items: [] })).catch(() => ({ items: [] })),
       fetch('/api/manual/member/trades?page=1&page_size=20').then((r) => (r.ok ? r.json() : { items: [] })).catch(() => ({ items: [] })),
+      fetch('/api/manual/member/sessions').then((r) => (r.ok ? r.json() : { items: [] })).catch(() => ({ items: [] })),
     ]);
     setSession(s);
     setCreds(c.items ?? []);
@@ -86,6 +88,7 @@ export default function MemberDashboardPage() {
     setByCoin(a?.by_coin ?? []);
     setMemberBalances(bal.items ?? []);
     setMemberTrades(tr.items ?? []);
+    setActiveSessions(sess.items ?? []);
     await refreshPrices();
   }
 
@@ -102,7 +105,27 @@ export default function MemberDashboardPage() {
       setErr(d.detail || d.error || '동기화 실패');
       return;
     }
+    if (Array.isArray(d.errors) && d.errors.length > 0) {
+      setErr(`일부 거래소 동기화 오류: ${d.errors.join(' / ')}`);
+    }
     setMsg(`내 계좌 동기화 완료 (조회 자산 ${d.accounts_count ?? 0}종 · 신규 체결 ${d.inserted_fills ?? 0}건)`);
+    load();
+  }
+
+  async function revokeOtherSessions() {
+    setErr('');
+    setMsg('');
+    const res = await fetch('/api/manual/member/sessions/revoke-others', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: '{}',
+    });
+    const d = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      setErr(d.detail || d.error || '세션 해제 실패');
+      return;
+    }
+    setMsg(`다른 기기 세션 ${d.revoked ?? 0}건을 로그아웃했습니다.`);
     load();
   }
 
@@ -506,6 +529,35 @@ export default function MemberDashboardPage() {
               비밀번호 변경
             </button>
           </form>
+        </section>
+
+        {/* 활성 세션 관리 */}
+        <section className="rounded-xl border border-[#1E2536] bg-[#121620] p-6 text-xs">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <h2 className="text-base font-semibold">활성 로그인 세션 ({activeSessions.length}개)</h2>
+              <p className="mt-1 text-zinc-400">현재 브라우저 외 다른 기기·브라우저의 로그인 세션을 즉시 만료시킬 수 있습니다.</p>
+            </div>
+            <button
+              type="button"
+              onClick={revokeOtherSessions}
+              className="rounded-lg border border-rose-500/40 bg-rose-500/10 px-3.5 py-2 font-semibold text-rose-300"
+            >
+              다른 기기 모두 로그아웃
+            </button>
+          </div>
+          {activeSessions.length > 0 && (
+            <div className="mt-3 space-y-1.5 font-mono text-[11px]">
+              {activeSessions.map((s, idx) => (
+                <div key={`${s.created_at}-${idx}`} className="flex items-center justify-between rounded border border-[#1E2536] bg-[#0E1119] px-3 py-2">
+                  <span className="text-zinc-300">
+                    IP: {s.ip} {s.is_current && <span className="ml-1.5 rounded bg-emerald-500/20 px-1.5 py-0.5 text-[10px] text-emerald-300">현재 기기</span>}
+                  </span>
+                  <span className="text-zinc-500">{s.created_at.slice(0, 16).replace('T', ' ')}</span>
+                </div>
+              ))}
+            </div>
+          )}
         </section>
       </main>
     </div>
