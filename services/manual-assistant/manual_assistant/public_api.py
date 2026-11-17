@@ -40,7 +40,7 @@ class AdminAuthService:
     def __init__(self, store):
         self.store = store
         self.failed_attempts: dict[str, list[float]] = {}
-        with self.store.connect() as conn:
+        with self.store.identity_connect() as conn:
             conn.execute(
                 """CREATE TABLE IF NOT EXISTS admin_sessions(
                     token_hash TEXT PRIMARY KEY,
@@ -65,8 +65,7 @@ class AdminAuthService:
 
     def login(self, username: str, password: str, ip: str = "unknown") -> tuple[str | None, int, str]:
         if not self._check_rate_limit(ip):
-            with self.store.connect() as conn:
-                self.store.audit(conn, "admin_login_rate_limited", {"ip": ip})
+            self.store.audit_event("admin_login_rate_limited", {"ip": ip})
             return None, 429, "로그인 시도 횟수를 초과했습니다. 5분 후 다시 시도하세요."
 
         expected_user = os.getenv("BSB_AUTH_USER", "admin")
@@ -77,34 +76,33 @@ class AdminAuthService:
         pass_ok = verify_password(password, expected_pass, expected_hash)
         if not (user_ok and pass_ok):
             self._record_failure(ip)
-            with self.store.connect() as conn:
-                self.store.audit(conn, "admin_login_failed", {"username": username[:32], "ip": ip})
+            self.store.audit_event("admin_login_failed", {"username": username[:32], "ip": ip})
             return None, 401, "아이디 또는 비밀번호가 올바르지 않습니다."
 
         self.failed_attempts.pop(ip, None)
         raw_token = secrets.token_urlsafe(32)
         now_dt = datetime.now(UTC)
         expires_dt = now_dt + timedelta(days=30)
-        with self.store.connect() as conn:
+        with self.store.identity_connect() as conn:
             conn.execute(
                 "INSERT INTO admin_sessions VALUES (?,?,?,?,?)",
                 (_hash_token(raw_token), expected_user, ip, expires_dt.isoformat(), now_dt.isoformat()),
             )
-            self.store.audit(conn, "admin_login_success", {"username": expected_user, "ip": ip})
+        self.store.audit_event("admin_login_success", {"username": expected_user, "ip": ip})
         return raw_token, 200, "OK"
 
     def validate(self, raw_token: str | None) -> str | None:
         if not raw_token:
             return None
         th = _hash_token(raw_token)
-        with self.store.connect() as conn:
+        with self.store.identity_connect() as conn:
             row = conn.execute(
                 "SELECT username, expires_at FROM admin_sessions WHERE token_hash=?",
                 (th,),
             ).fetchone()
             if not row:
                 return None
-            if datetime.fromisoformat(row["expires_at"]) < datetime.now(UTC):
+            if datetime.fromisoformat(str(row["expires_at"])) < datetime.now(UTC):
                 conn.execute("DELETE FROM admin_sessions WHERE token_hash=?", (th,))
                 return None
             return row["username"]
@@ -112,9 +110,9 @@ class AdminAuthService:
     def logout(self, raw_token: str | None, ip: str = "unknown"):
         if not raw_token:
             return
-        with self.store.connect() as conn:
+        with self.store.identity_connect() as conn:
             conn.execute("DELETE FROM admin_sessions WHERE token_hash=?", (_hash_token(raw_token),))
-            self.store.audit(conn, "admin_logout", {"ip": ip})
+        self.store.audit_event("admin_logout", {"ip": ip})
 
 
 def public_market_summary(market) -> dict:

@@ -13,6 +13,14 @@ CREATE TABLE IF NOT EXISTS users (
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+CREATE TABLE IF NOT EXISTS admin_sessions (
+  token_hash TEXT PRIMARY KEY,
+  username TEXT NOT NULL,
+  ip TEXT,
+  expires_at TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS user_sessions (
   token_hash TEXT PRIMARY KEY,
   user_id TEXT NOT NULL,

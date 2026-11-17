@@ -577,3 +577,9 @@ def test_postgres_identity_compat_adapter(tmp_path, monkeypatch):
     sync_svc = AnalyticsSyncService(store, None)
     sync_svc.status()
     assert any("FROM analytics_sync_jobs" in sql for sql, _ in executed)
+
+    from manual_assistant.public_api import AdminAuthService
+
+    admin_auth = AdminAuthService(store)
+    admin_auth.login("admin", "bsb1234!", ip="127.0.0.1")
+    assert any("INSERT INTO admin_sessions" in sql for sql, _ in executed)
