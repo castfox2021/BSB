@@ -1273,6 +1273,53 @@ def create_app(
 
         return check_pg_connection_and_parity(store)
 
+    @app.get("/api/admin/system/memory")
+    def get_admin_system_memory():
+        import gc
+        import resource
+        import sys
+        import threading
+
+        proc_status: dict[str, str] = {}
+        try:
+            with open("/proc/self/status", encoding="utf-8") as fh:
+                for line in fh:
+                    if ":" in line:
+                        k, v = line.split(":", 1)
+                        proc_status[k.strip()] = v.strip()
+        except OSError:
+            pass
+
+        def _kb_to_mb(key: str) -> float | None:
+            raw = proc_status.get(key)
+            if not raw:
+                return None
+            parts = raw.split()
+            try:
+                return round(int(parts[0]) / 1024, 2)
+            except ValueError:
+                return None
+
+        rss_mb = _kb_to_mb("VmRSS")
+        if rss_mb is None:
+            ru = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+            rss_mb = round(ru / (1048576 if sys.platform == "darwin" else 1024), 2)
+
+        m = market()
+        return {
+            "vm_rss_mb": rss_mb,
+            "vm_hwm_mb": _kb_to_mb("VmHWM"),
+            "vm_swap_mb": _kb_to_mb("VmSwap"),
+            "threads": int(proc_status["Threads"]) if "Threads" in proc_status else threading.active_count(),
+            "trade_queue_size": m.trade_queue.qsize(),
+            "seen_events_count": len(m.rolling.seen),
+            "detail_cache_count": len(m.detail_cache),
+            "latest_symbols_count": len(m.latest),
+            "universe_count": len(m.universe),
+            "gc_counts": list(gc.get_count()),
+            "postgres_identity_enabled": store.is_postgres_enabled(),
+        }
+
     @app.post("/api/admin/pg-migration/apply")
     async def apply_pg_migration(request: Request):
         await body(request)

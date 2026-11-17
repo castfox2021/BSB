@@ -163,6 +163,7 @@ def test_admin_audit_logs_rbac_and_pg_migration_preview(tmp_path, monkeypatch):
         assert client.get("/api/admin/audit-logs", headers={**HEADERS, "x-bsb-admin-session": m_tok}).status_code == 401
         assert client.get("/api/admin/pg-migration/preview", headers={**HEADERS, "x-bsb-admin-session": m_tok}).status_code == 401
         assert client.get("/api/admin/pg-migration/status", headers={**HEADERS, "x-bsb-admin-session": m_tok}).status_code == 401
+        assert client.get("/api/admin/system/memory", headers={**HEADERS, "x-bsb-admin-session": m_tok}).status_code == 401
         assert client.get("/api/admin/pg-migration/export", headers={**HEADERS, "x-bsb-admin-session": m_tok}).status_code == 401
         assert client.post("/api/admin/pg-migration/apply", headers={**HEADERS, "x-bsb-admin-session": m_tok}, json={}).status_code == 401
 
@@ -181,6 +182,11 @@ def test_admin_audit_logs_rbac_and_pg_migration_preview(tmp_path, monkeypatch):
         pg_st = client.get("/api/admin/pg-migration/status", headers=a_h)
         assert pg_st.status_code == 200
         assert "sqlite_counts" in pg_st.json()
+        mem_st = client.get("/api/admin/system/memory", headers=a_h)
+        assert mem_st.status_code == 200
+        assert mem_st.json()["threads"] >= 1
+        assert "trade_queue_size" in mem_st.json()
+        assert "seen_events_count" in mem_st.json()
         pg_exp = client.get("/api/admin/pg-migration/export", headers=a_h)
         assert pg_exp.status_code == 200
         assert "bsb-pg-migration.sql" in pg_exp.headers.get("content-disposition", "")

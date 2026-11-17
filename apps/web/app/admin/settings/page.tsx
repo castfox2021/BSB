@@ -24,7 +24,34 @@ export default function AdminSettingsPage() {
   } | null>(null);
   const [pgMsg, setPgMsg] = useState('');
   const [pgBusy, setPgBusy] = useState(false);
+  const [memStats, setMemStats] = useState<{
+    vm_rss_mb: number | null;
+    vm_hwm_mb: number | null;
+    vm_swap_mb: number | null;
+    threads: number;
+    trade_queue_size: number;
+    seen_events_count: number;
+    detail_cache_count: number;
+    latest_symbols_count: number;
+    postgres_identity_enabled: boolean;
+  } | null>(null);
   const [members, setMembers] = useState<{ id: string; email: string; role: string; mfa_enabled: boolean; exchanges: string[]; credentials_count: number; created_at: string }[]>([]);
+
+  function refreshMemory() {
+    api<{
+      vm_rss_mb: number | null;
+      vm_hwm_mb: number | null;
+      vm_swap_mb: number | null;
+      threads: number;
+      trade_queue_size: number;
+      seen_events_count: number;
+      detail_cache_count: number;
+      latest_symbols_count: number;
+      postgres_identity_enabled: boolean;
+    }>('admin/system/memory')
+      .then(setMemStats)
+      .catch(() => {});
+  }
 
   useEffect(() => {
     api<Board>('board?buy_page=1&sell_page=1')
@@ -43,6 +70,7 @@ export default function AdminSettingsPage() {
     api<{ items: { id: string; email: string; role: string; mfa_enabled: boolean; exchanges: string[]; credentials_count: number; created_at: string }[] }>('admin/members')
       .then((d) => setMembers(d.items ?? []))
       .catch(() => {});
+    refreshMemory();
   }, [rev]);
 
   async function setupMfa() {
@@ -212,6 +240,50 @@ export default function AdminSettingsPage() {
               {pgPreview.ddl_preview}
             </pre>
           </details>
+        )}
+
+        {memStats && (
+          <section className="rounded-xl border border-[#1E2536] bg-[#121620] p-6 text-xs">
+            <div className="flex items-center justify-between">
+              <div>
+                <h3 className="text-base font-semibold text-zinc-100">백엔드 메모리 · 스레드 · 큐 상태 (Task 20 모니터)</h3>
+                <p className="mt-1 text-zinc-400">FastAPI 프로세스 RSS·스왑·스레드 및 인메모리 캐시 상한을 실시간으로 점검합니다.</p>
+              </div>
+              <button
+                type="button"
+                onClick={refreshMemory}
+                className="rounded-lg border border-[#2A344B] bg-[#181E2B] px-3 py-1.5 font-mono text-[11px] text-zinc-200 hover:border-zinc-400"
+              >
+                새로고침
+              </button>
+            </div>
+            <div className="mt-4 grid grid-cols-2 gap-3 font-mono sm:grid-cols-4">
+              <div className="rounded-lg border border-[#1E2536] bg-[#0E1119] p-3">
+                <p className="text-zinc-400">VmRSS / HWM</p>
+                <p className="mt-1 text-sm font-semibold text-zinc-100">
+                  {memStats.vm_rss_mb ?? '—'} MB {memStats.vm_hwm_mb != null ? `/ ${memStats.vm_hwm_mb} MB` : ''}
+                </p>
+              </div>
+              <div className="rounded-lg border border-[#1E2536] bg-[#0E1119] p-3">
+                <p className="text-zinc-400">VmSwap / Threads</p>
+                <p className="mt-1 text-sm font-semibold text-zinc-100">
+                  {memStats.vm_swap_mb != null ? `${memStats.vm_swap_mb} MB` : '—'} · {memStats.threads}개
+                </p>
+              </div>
+              <div className="rounded-lg border border-[#1E2536] bg-[#0E1119] p-3">
+                <p className="text-zinc-400">큐 / seen 캐시</p>
+                <p className="mt-1 text-sm font-semibold text-zinc-100">
+                  {memStats.trade_queue_size} / {memStats.seen_events_count.toLocaleString('ko-KR')}
+                </p>
+              </div>
+              <div className="rounded-lg border border-[#1E2536] bg-[#0E1119] p-3">
+                <p className="text-zinc-400">detail / 인증 저장소</p>
+                <p className="mt-1 text-sm font-semibold text-zinc-100">
+                  {memStats.detail_cache_count}종목 · {memStats.postgres_identity_enabled ? 'PostgreSQL' : 'SQLite'}
+                </p>
+              </div>
+            </div>
+          </section>
         )}
 
         <section className="rounded-xl border border-[#1E2536] bg-[#121620] p-6 text-xs">
