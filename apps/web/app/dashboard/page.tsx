@@ -81,6 +81,12 @@ export default function MemberDashboardPage() {
   const [periodFilter, setPeriodFilter] = useState<'all' | 'today' | '7d' | '30d'>('all');
   const [marketInput, setMarketInput] = useState('');
   const [marketFilter, setMarketFilter] = useState('');
+  const [prefs, setPrefs] = useState<{ auto_sync_enabled: boolean; auto_sync_interval_sec: number; watch_alerts_enabled: boolean }>({
+    auto_sync_enabled: false,
+    auto_sync_interval_sec: 60,
+    watch_alerts_enabled: false,
+  });
+  const [lastAutoSync, setLastAutoSync] = useState('');
   const [msg, setMsg] = useState('');
   const [err, setErr] = useState('');
 
@@ -107,7 +113,7 @@ export default function MemberDashboardPage() {
     marketRaw: string = marketFilter,
   ) {
     const mParam = normalizeMarketParam(marketRaw);
-    const [s, c, a, bal, tr, oo, sess] = await Promise.all([
+    const [s, c, a, bal, tr, oo, sess, pr] = await Promise.all([
       fetch('/api/manual/auth/session').then((r) => r.json()).catch(() => null),
       fetch('/api/manual/member/credentials').then((r) => (r.ok ? r.json() : { items: [] })).catch(() => ({ items: [] })),
       fetch(`/api/manual/member/analytics?exchange=${ex}&period=${period}&market=${encodeURIComponent(mParam)}`).then((r) => (r.ok ? r.json() : null)).catch(() => null),
@@ -115,6 +121,7 @@ export default function MemberDashboardPage() {
       fetch(`/api/manual/member/trades?page=1&page_size=20&exchange=${ex}&period=${period}&market=${encodeURIComponent(mParam)}`).then((r) => (r.ok ? r.json() : { items: [], total: 0 })).catch(() => ({ items: [], total: 0 })),
       fetch('/api/manual/member/open-orders').then((r) => (r.ok ? r.json() : { items: [] })).catch(() => ({ items: [] })),
       fetch('/api/manual/member/sessions').then((r) => (r.ok ? r.json() : { items: [] })).catch(() => ({ items: [] })),
+      fetch('/api/manual/member/preferences').then((r) => (r.ok ? r.json() : null)).catch(() => null),
     ]);
     setSession(s);
     setCreds(c.items ?? []);
@@ -128,6 +135,7 @@ export default function MemberDashboardPage() {
     setTradesTotal(Number(tr.total ?? (tr.items ?? []).length));
     setOpenOrders(oo.items ?? []);
     setActiveSessions(sess.items ?? []);
+    if (pr && typeof pr.auto_sync_enabled === 'boolean') setPrefs(pr);
     await refreshPrices();
   }
 
@@ -217,11 +225,44 @@ export default function MemberDashboardPage() {
     load();
   }
 
+  async function updatePrefs(patch: Partial<{ auto_sync_enabled: boolean; auto_sync_interval_sec: number; watch_alerts_enabled: boolean }>) {
+    if (patch.watch_alerts_enabled && typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'default') {
+      Notification.requestPermission().catch(() => {});
+    }
+    const res = await fetch('/api/manual/member/preferences', {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(patch),
+    });
+    if (res.ok) {
+      const next = await res.json().catch(() => null);
+      if (next) setPrefs(next);
+    }
+  }
+
   useEffect(() => {
     load();
     const timer = setInterval(refreshPrices, 10000);
     return () => clearInterval(timer);
   }, []);
+
+  useEffect(() => {
+    if (!prefs.auto_sync_enabled) return;
+    const ms = Math.max(30, prefs.auto_sync_interval_sec || 60) * 1000;
+    const timer = setInterval(async () => {
+      const res = await fetch('/api/manual/member/sync', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: '{}',
+      }).catch(() => null);
+      if (res?.ok) {
+        const t = new Date();
+        setLastAutoSync(t.toTimeString().slice(0, 8));
+        load();
+      }
+    }, ms);
+    return () => clearInterval(timer);
+  }, [prefs.auto_sync_enabled, prefs.auto_sync_interval_sec]);
 
   async function saveCred(e: FormEvent) {
     e.preventDefault();
@@ -420,6 +461,39 @@ export default function MemberDashboardPage() {
               <button type="button" onClick={syncMemberAccount} className="rounded-lg border border-emerald-500/40 bg-emerald-500/15 px-3.5 py-2 font-semibold text-emerald-300">
                 내 계좌 동기화
               </button>
+              <button
+                type="button"
+                onClick={() => updatePrefs({ auto_sync_enabled: !prefs.auto_sync_enabled })}
+                className={`rounded-lg border px-2.5 py-1.5 font-mono text-[11px] ${
+                  prefs.auto_sync_enabled
+                    ? 'border-emerald-500/40 bg-emerald-500/15 text-emerald-300'
+                    : 'border-[#1E2536] bg-[#0E1119] text-zinc-400'
+                }`}
+              >
+                자동동기화 {prefs.auto_sync_enabled ? 'ON' : 'OFF'}
+              </button>
+              <select
+                value={prefs.auto_sync_interval_sec}
+                onChange={(e) => updatePrefs({ auto_sync_interval_sec: Number(e.target.value) })}
+                className="rounded-lg border border-[#1E2536] bg-[#0E1119] px-2 py-1.5 font-mono text-[11px] text-zinc-300"
+              >
+                <option value={30}>30초</option>
+                <option value={60}>60초</option>
+                <option value={180}>3분</option>
+                <option value={300}>5분</option>
+              </select>
+              <button
+                type="button"
+                onClick={() => updatePrefs({ watch_alerts_enabled: !prefs.watch_alerts_enabled })}
+                className={`rounded-lg border px-2.5 py-1.5 font-mono text-[11px] ${
+                  prefs.watch_alerts_enabled
+                    ? 'border-amber-500/40 bg-amber-500/15 text-amber-300'
+                    : 'border-[#1E2536] bg-[#0E1119] text-zinc-400'
+                }`}
+              >
+                관찰알림 {prefs.watch_alerts_enabled ? 'ON' : 'OFF'}
+              </button>
+              {lastAutoSync && <span className="font-mono text-[10px] text-zinc-500">동기화 {lastAutoSync}</span>}
             </div>
           </div>
           <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-[#1E2536] pt-3">

@@ -2058,6 +2058,7 @@ def create_app(
             conn.execute("DELETE FROM private_accounts WHERE account_id=?", (member_acc,))
             conn.execute("DELETE FROM exchange_fills WHERE account_id=?", (member_acc,))
             conn.execute("DELETE FROM trade_positions WHERE account_id=?", (member_acc,))
+            conn.execute("DELETE FROM settings WHERE key=?", (f"member_prefs:{uid}",))
         store.audit_event("member_account_deleted", {"user_id": uid})
         resp = JSONResponse({"deleted": True})
         resp.delete_cookie("bsb_session", path="/")
@@ -2076,6 +2077,46 @@ def create_app(
                 ).fetchall()
             ]
         return {"items": rows}
+
+    def _default_member_prefs() -> dict:
+        return {"auto_sync_enabled": False, "auto_sync_interval_sec": 60, "watch_alerts_enabled": False}
+
+    @app.get("/api/member/preferences")
+    def member_get_preferences(request: Request):
+        uid, _ = _current_user(request)
+        prefs = _default_member_prefs()
+        with store.connect() as conn:
+            row = conn.execute("SELECT value FROM settings WHERE key=?", (f"member_prefs:{uid}",)).fetchone()
+        if row and row["value"]:
+            try:
+                loaded = json.loads(row["value"])
+                if isinstance(loaded, dict):
+                    prefs.update({k: v for k, v in loaded.items() if k in prefs})
+            except Exception:
+                pass
+        return prefs
+
+    @app.put("/api/member/preferences")
+    async def member_update_preferences(request: Request):
+        uid, _ = _current_user(request)
+        payload = await body(request)
+        cur = member_get_preferences(request)
+        if "auto_sync_enabled" in payload:
+            cur["auto_sync_enabled"] = bool(payload["auto_sync_enabled"])
+        if "auto_sync_interval_sec" in payload:
+            try:
+                sec = int(payload["auto_sync_interval_sec"])
+            except (TypeError, ValueError):
+                sec = 60
+            cur["auto_sync_interval_sec"] = sec if sec in (30, 60, 180, 300) else 60
+        if "watch_alerts_enabled" in payload:
+            cur["watch_alerts_enabled"] = bool(payload["watch_alerts_enabled"])
+        with store.connect() as conn:
+            conn.execute(
+                "INSERT OR REPLACE INTO settings(key,value,updated_at) VALUES (?,?,?)",
+                (f"member_prefs:{uid}", json.dumps(cur), now()),
+            )
+        return cur
 
     @app.get("/api/public/exchanges/tickers")
     async def get_public_exchange_tickers(exchange: str = "bithumb", limit: int = 100):
