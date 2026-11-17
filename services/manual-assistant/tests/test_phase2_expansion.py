@@ -164,6 +164,7 @@ def test_admin_audit_logs_rbac_and_pg_migration_preview(tmp_path, monkeypatch):
         assert client.get("/api/admin/pg-migration/preview", headers={**HEADERS, "x-bsb-admin-session": m_tok}).status_code == 401
         assert client.get("/api/admin/pg-migration/status", headers={**HEADERS, "x-bsb-admin-session": m_tok}).status_code == 401
         assert client.get("/api/admin/system/memory", headers={**HEADERS, "x-bsb-admin-session": m_tok}).status_code == 401
+        assert client.post("/api/admin/system/prune-archive", headers={**HEADERS, "x-bsb-admin-session": m_tok}, json={"retention_days": 7}).status_code == 401
         assert client.get("/api/admin/pg-migration/export", headers={**HEADERS, "x-bsb-admin-session": m_tok}).status_code == 401
         assert client.post("/api/admin/pg-migration/apply", headers={**HEADERS, "x-bsb-admin-session": m_tok}, json={}).status_code == 401
 
@@ -187,6 +188,21 @@ def test_admin_audit_logs_rbac_and_pg_migration_preview(tmp_path, monkeypatch):
         assert mem_st.json()["threads"] >= 1
         assert "trade_queue_size" in mem_st.json()
         assert "seen_events_count" in mem_st.json()
+        with app.state.storage.market_store.connect() as mconn:
+            mconn.execute(
+                "INSERT INTO market_events VALUES (?,?,?,?,?,?)",
+                ("ev-old", "KRW-BTC", "public.trade", "2020-01-01T00:00:00+00:00", "2020-01-01T00:00:00+00:00", "{}"),
+            )
+            mconn.execute(
+                "INSERT INTO market_events VALUES (?,?,?,?,?,?)",
+                ("ev-new", "KRW-BTC", "public.trade", "2099-01-01T00:00:00+00:00", "2099-01-01T00:00:00+00:00", "{}"),
+            )
+        pruned = client.post("/api/admin/system/prune-archive", headers=a_h, json={"retention_days": 7})
+        assert pruned.status_code == 200
+        assert pruned.json()["market_events_deleted"] == 1
+        with app.state.storage.market_store.connect() as mconn:
+            rem = mconn.execute("SELECT count(*) FROM market_events").fetchone()[0]
+            assert rem == 1
         pg_exp = client.get("/api/admin/pg-migration/export", headers=a_h)
         assert pg_exp.status_code == 200
         assert "bsb-pg-migration.sql" in pg_exp.headers.get("content-disposition", "")

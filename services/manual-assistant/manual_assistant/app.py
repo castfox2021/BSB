@@ -270,6 +270,7 @@ def create_app(
                     return_exceptions=True,
                 )
                 io_executor.shutdown(wait=False)
+                store.close_pools()
 
     app = FastAPI(title="Bithumb Manual Trading Strategy Lab", lifespan=lifespan)
     app.add_middleware(TrustedHostMiddleware, allowed_hosts=["localhost", "127.0.0.1"])
@@ -1323,6 +1324,14 @@ def create_app(
             "gc_counts": list(gc.get_count()),
             "postgres_identity_enabled": store.is_postgres_enabled(),
         }
+
+    @app.post("/api/admin/system/prune-archive")
+    async def prune_admin_archive(request: Request):
+        data = await body(request)
+        days = int(data.get("retention_days") or 7)
+        res = await asyncio.to_thread(store.prune_old_market_data, days)
+        store.audit_event("archive_pruned", res)
+        return res
 
     @app.post("/api/admin/pg-migration/apply")
     async def apply_pg_migration(request: Request):

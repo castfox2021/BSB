@@ -138,6 +138,24 @@ export default function AdminSettingsPage() {
     }
   }
 
+  async function pruneArchive() {
+    if (!window.confirm('7일 이전의 replay_candles 및 market_events 아카이브를 정리할까요?')) {
+      return;
+    }
+    const res = await fetch('/api/manual/admin/system/prune-archive', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ retention_days: 7 }),
+    });
+    const d = await res.json().catch(() => ({}));
+    if (res.ok) {
+      setPgMsg(`아카이브 정리 완료: replay_candles ${d.replay_candles_deleted ?? 0}건, market_events ${d.market_events_deleted ?? 0}건 삭제`);
+      refreshMemory();
+    } else {
+      setPgMsg(`아카이브 정리 실패: ${d.detail || d.error || res.status}`);
+    }
+  }
+
   return (
     <AdminShell>
       <div className="space-y-6">
@@ -249,13 +267,22 @@ export default function AdminSettingsPage() {
                 <h3 className="text-base font-semibold text-zinc-100">백엔드 메모리 · 스레드 · 큐 상태 (Task 20 모니터)</h3>
                 <p className="mt-1 text-zinc-400">FastAPI 프로세스 RSS·스왑·스레드 및 인메모리 캐시 상한을 실시간으로 점검합니다.</p>
               </div>
-              <button
-                type="button"
-                onClick={refreshMemory}
-                className="rounded-lg border border-[#2A344B] bg-[#181E2B] px-3 py-1.5 font-mono text-[11px] text-zinc-200 hover:border-zinc-400"
-              >
-                새로고침
-              </button>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={pruneArchive}
+                  className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-1.5 font-mono text-[11px] text-amber-300 hover:border-amber-400"
+                >
+                  7일 이전 아카이브 정리
+                </button>
+                <button
+                  type="button"
+                  onClick={refreshMemory}
+                  className="rounded-lg border border-[#2A344B] bg-[#181E2B] px-3 py-1.5 font-mono text-[11px] text-zinc-200 hover:border-zinc-400"
+                >
+                  새로고침
+                </button>
+              </div>
             </div>
             <div className="mt-4 grid grid-cols-2 gap-3 font-mono sm:grid-cols-4">
               <div className="rounded-lg border border-[#1E2536] bg-[#0E1119] p-3">

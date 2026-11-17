@@ -2,8 +2,9 @@ import json
 import os
 import re
 import sqlite3
+import threading
 from contextlib import contextmanager
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 
@@ -52,6 +53,9 @@ class Storage:
     def __init__(self, path: Path):
         self.path = path
         self.market_store = self
+        self._pg_local = threading.local()
+        self._pg_conns: list = []
+        self._pg_lock = threading.Lock()
 
     @staticmethod
     def is_postgres_enabled() -> bool:
@@ -63,22 +67,44 @@ class Storage:
         except ImportError:
             return False
 
+    def _get_pg_conn(self):
+        import psycopg  # type: ignore
+        from psycopg.rows import dict_row  # type: ignore
+
+        conn = getattr(self._pg_local, "conn", None)
+        if conn is not None:
+            if not getattr(conn, "closed", False):
+                return conn
+        dsn = (os.environ.get("DATABASE_URL") or "").strip()
+        conn = psycopg.connect(dsn, row_factory=dict_row)
+        self._pg_local.conn = conn
+        with self._pg_lock:
+            self._pg_conns.append(conn)
+        return conn
+
+    def close_pools(self):
+        with self._pg_lock:
+            for conn in self._pg_conns:
+                try:
+                    conn.close()
+                except Exception:
+                    pass
+            self._pg_conns.clear()
+        self._pg_local = threading.local()
+
     @contextmanager
     def identity_connect(self):
         if self.is_postgres_enabled():
-            import psycopg  # type: ignore
-            from psycopg.rows import dict_row  # type: ignore
-
-            dsn = (os.environ.get("DATABASE_URL") or "").strip()
-            pg_conn = psycopg.connect(dsn, row_factory=dict_row)
+            pg_conn = self._get_pg_conn()
             try:
                 yield _PgCompatConn(pg_conn)
                 pg_conn.commit()
             except Exception:
-                pg_conn.rollback()
+                try:
+                    pg_conn.rollback()
+                except Exception:
+                    self._pg_local.conn = None
                 raise
-            finally:
-                pg_conn.close()
         else:
             with self.connect() as conn:
                 yield conn
@@ -160,6 +186,28 @@ class Storage:
                 pass
         with self.connect() as conn:
             self.audit(conn, kind, details)
+
+    def prune_old_market_data(self, retention_days: int = 7) -> dict:
+        """Delete market_events older than retention_days in bounded batches."""
+        days = max(1, min(int(retention_days), 365))
+        cutoff = (datetime.now(UTC) - timedelta(days=days)).isoformat()
+        events_deleted = 0
+        with self.market_store.connect() as mconn:
+            while True:
+                mconn.execute(
+                    "DELETE FROM market_events WHERE rowid IN (SELECT rowid FROM market_events WHERE received_at < ? LIMIT 5000)",
+                    (cutoff,),
+                )
+                n = mconn.execute("SELECT changes()").fetchone()[0]
+                events_deleted += n
+                if n < 5000:
+                    break
+        return {
+            "retention_days": days,
+            "cutoff": cutoff,
+            "replay_candles_deleted": 0,
+            "market_events_deleted": events_deleted,
+        }
 
     def settings(self):
         with self.connect() as conn:
