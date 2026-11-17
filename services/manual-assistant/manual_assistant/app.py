@@ -248,11 +248,45 @@ def create_app(
                     except Exception:
                         pass
 
+            async def _member_auto_sync_loop():
+                import time as _time
+
+                last_run: dict[str, float] = {}
+                while True:
+                    await asyncio.sleep(15)
+                    try:
+                        with store.connect() as conn:
+                            pref_rows = conn.execute(
+                                "SELECT key, value FROM settings WHERE key LIKE 'member_prefs:%'"
+                            ).fetchall()
+                        now_mono = _time.monotonic()
+                        for prow in pref_rows:
+                            uid = str(prow["key"]).split(":", 1)[1]
+                            try:
+                                prefs = json.loads(prow["value"])
+                            except Exception:
+                                continue
+                            if not isinstance(prefs, dict) or not prefs.get("auto_sync_enabled"):
+                                continue
+                            interval = int(prefs.get("auto_sync_interval_sec") or 60)
+                            if interval < 30:
+                                interval = 30
+                            if now_mono - last_run.get(uid, 0.0) < interval:
+                                continue
+                            last_run[uid] = now_mono
+                            try:
+                                await _sync_member_uid(uid)
+                            except Exception:
+                                pass
+                    except Exception:
+                        pass
+
             evaluator = asyncio.create_task(engine.run())
             order_monitor = asyncio.create_task(app.state.orders.run())
             automation_runner = asyncio.create_task(app.state.automation.run())
             analytics_task = asyncio.create_task(analytics_sync.run())
             trim_task = asyncio.create_task(_memory_trim_loop())
+            member_sync_task = asyncio.create_task(_member_auto_sync_loop())
             try:
                 yield
             finally:
@@ -261,6 +295,7 @@ def create_app(
                 automation_runner.cancel()
                 analytics_task.cancel()
                 trim_task.cancel()
+                member_sync_task.cancel()
                 for task in jobs:
                     task.cancel()
                 await asyncio.gather(
@@ -269,6 +304,7 @@ def create_app(
                     automation_runner,
                     analytics_task,
                     trim_task,
+                    member_sync_task,
                     *jobs,
                     return_exceptions=True,
                 )
@@ -1734,14 +1770,11 @@ def create_app(
             inserted += conn.execute("SELECT changes()").fetchone()[0]
         return inserted
 
-    @app.post("/api/member/sync")
-    async def member_sync(request: Request):
-        await body(request)
-        uid, _ = _current_user(request)
+    async def _sync_member_uid(uid: str) -> dict | None:
         bithumb_pair = app.state.identity.get_decrypted_credential(uid, "BITHUMB")
         upbit_pair = app.state.identity.get_decrypted_credential(uid, "UPBIT")
         if not bithumb_pair and not upbit_pair:
-            raise HTTPException(status_code=400, detail="저장된 BITHUMB 또는 UPBIT API 키가 없습니다.")
+            return None
         member_acc = f"member:{uid}"
         inserted_fills = 0
         accounts_count = 0
@@ -1850,6 +1883,15 @@ def create_app(
             "inserted_fills": inserted_fills,
             "errors": sync_errors,
         }
+
+    @app.post("/api/member/sync")
+    async def member_sync(request: Request):
+        await body(request)
+        uid, _ = _current_user(request)
+        result = await _sync_member_uid(uid)
+        if result is None:
+            raise HTTPException(status_code=400, detail="저장된 BITHUMB 또는 UPBIT API 키가 없습니다.")
+        return result
 
     @app.get("/api/member/analytics")
     def member_analytics(request: Request, exchange: str = "ALL", period: str = "all", market: str = "ALL"):
