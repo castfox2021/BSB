@@ -1534,6 +1534,56 @@ def create_app(
             raise HTTPException(status_code=404, detail="키를 찾을 수 없습니다.")
         return {"deleted": True}
 
+    def _insert_member_exchange_fills(
+        conn,
+        exchange_name: str,
+        data_source: str,
+        member_acc: str,
+        orders: list,
+    ) -> int:
+        inserted = 0
+        for o in orders:
+            if not isinstance(o, dict):
+                continue
+            ex_oid = str(o.get("uuid") or "")
+            exec_vol = Decimal(str(o.get("executed_volume") or "0"))
+            if not ex_oid or exec_vol <= 0:
+                continue
+            side = "BUY" if str(o.get("side", "")).lower() in ("bid", "buy") else "SELL"
+            price = Decimal(str(o.get("price") or "0"))
+            funds = Decimal(str(o.get("executed_funds") or (price * exec_vol)))
+            fee = Decimal(str(o.get("paid_fee") or "0"))
+            fill_price = price if price > 0 else (funds / exec_vol if exec_vol > 0 else Decimal("0"))
+            conn.execute(
+                """INSERT OR IGNORE INTO exchange_fills
+                (id,exchange,account_id,exchange_fill_id,exchange_order_id,client_order_id,market,side,fill_price,fill_quantity,fill_amount,fee_amount,fee_currency,fee_krw_equiv,fee_eval_note,execution_origin,data_source,source_hash,filled_at,raw_payload)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                (
+                    uuid4().hex,
+                    exchange_name,
+                    member_acc,
+                    ex_oid,
+                    ex_oid,
+                    o.get("client_order_id"),
+                    o.get("market", ""),
+                    side,
+                    str(fill_price),
+                    str(exec_vol),
+                    str(funds),
+                    str(fee),
+                    "KRW",
+                    str(fee),
+                    "member_sync",
+                    "MANUAL",
+                    data_source,
+                    None,
+                    o.get("created_at") or now(),
+                    json.dumps({"uuid": ex_oid}),
+                ),
+            )
+            inserted += conn.execute("SELECT changes()").fetchone()[0]
+        return inserted
+
     @app.post("/api/member/sync")
     async def member_sync(request: Request):
         await body(request)
@@ -1574,51 +1624,33 @@ def create_app(
                 orders = await client.get("/v1/orders", {"states[]": "done", "page": 1, "limit": 50, "order_by": "desc"})
                 if isinstance(orders, list):
                     with store.connect() as conn:
-                        for o in orders:
-                            ex_oid = str(o.get("uuid") or "")
-                            exec_vol = Decimal(str(o.get("executed_volume") or "0"))
-                            if not ex_oid or exec_vol <= 0:
-                                continue
-                            side = "BUY" if str(o.get("side", "")).lower() in ("bid", "buy") else "SELL"
-                            price = Decimal(str(o.get("price") or "0"))
-                            funds = Decimal(str(o.get("executed_funds") or (price * exec_vol)))
-                            fee = Decimal(str(o.get("paid_fee") or "0"))
-                            conn.execute(
-                                """INSERT OR IGNORE INTO exchange_fills
-                                (id,exchange,account_id,exchange_fill_id,exchange_order_id,client_order_id,market,side,fill_price,fill_quantity,fill_amount,fee_amount,fee_currency,fee_krw_equiv,fee_eval_note,execution_origin,data_source,source_hash,filled_at,raw_payload)
-                                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-                                (
-                                    uuid4().hex,
-                                    "bithumb",
-                                    member_acc,
-                                    ex_oid,
-                                    ex_oid,
-                                    o.get("client_order_id"),
-                                    o.get("market", ""),
-                                    side,
-                                    str(price if price > 0 else (funds / exec_vol if exec_vol > 0 else 0)),
-                                    str(exec_vol),
-                                    str(funds),
-                                    str(fee),
-                                    "KRW",
-                                    str(fee),
-                                    "member_sync",
-                                    "MANUAL",
-                                    "BITHUMB_API",
-                                    None,
-                                    o.get("created_at") or now(),
-                                    json.dumps({"uuid": ex_oid}),
-                                ),
-                            )
-                            inserted_fills += conn.execute("SELECT changes()").fetchone()[0]
+                        inserted_fills += _insert_member_exchange_fills(
+                            conn, "bithumb", "BITHUMB_API", member_acc, orders
+                        )
             finally:
                 await client.close()
 
         if upbit_pair:
+            import hashlib
+            from urllib.parse import urlencode
+
             import httpx
             import jwt as pyjwt
 
             up_token = pyjwt.encode({"access_key": upbit_pair[0], "nonce": str(uuid4())}, upbit_pair[1], algorithm="HS256")
+            order_params = [("states[]", "done"), ("limit", "50"), ("order_by", "desc")]
+            query_string = urlencode(order_params)
+            qhash = hashlib.sha512(query_string.encode("utf-8")).hexdigest()
+            orders_token = pyjwt.encode(
+                {
+                    "access_key": upbit_pair[0],
+                    "nonce": str(uuid4()),
+                    "query_hash": qhash,
+                    "query_hash_alg": "SHA512",
+                },
+                upbit_pair[1],
+                algorithm="HS256",
+            )
             async with httpx.AsyncClient(timeout=8, follow_redirects=False, trust_env=False) as uclient:
                 ures = await uclient.get(
                     "https://api.upbit.com/v1/accounts",
@@ -1641,6 +1673,15 @@ def create_app(
                                     now(),
                                 ),
                             )
+                ores = await uclient.get(
+                    f"https://api.upbit.com/v1/orders/closed?{query_string}",
+                    headers={"Authorization": f"Bearer {orders_token}"},
+                )
+                if ores.status_code == 200 and isinstance(ores.json(), list):
+                    with store.connect() as conn:
+                        inserted_fills += _insert_member_exchange_fills(
+                            conn, "upbit", "UPBIT_API", member_acc, ores.json()
+                        )
 
         app.state.analytics_ledger.recalculate(member_acc)
         return {
@@ -1655,6 +1696,24 @@ def create_app(
         return app.state.analytics_ledger.query_analytics(
             {"mode": "LIVE", "period": "all", "account_id": f"member:{uid}"}
         )
+
+    @app.get("/api/member/trades")
+    def member_trades(request: Request, page: int = 1, page_size: int = 20):
+        uid, _ = _current_user(request)
+        data = app.state.analytics_ledger.query_analytics(
+            {"mode": "LIVE", "period": "all", "account_id": f"member:{uid}"}
+        )
+        items = data["trades"]
+        total = len(items)
+        safe_size = max(1, min(page_size, 100))
+        safe_page = max(1, page)
+        start = (safe_page - 1) * safe_size
+        return {
+            "items": items[start : start + safe_size],
+            "total": total,
+            "page": safe_page,
+            "page_size": safe_size,
+        }
 
     @app.get("/api/member/accounts")
     def member_accounts(request: Request):

@@ -5,6 +5,25 @@ import { useRouter } from 'next/navigation';
 import { PublicHeader } from '../components/public-nav';
 
 type Cred = { id: string; exchange: string; label: string; key_hint: string; created_at: string };
+type MemberBalance = {
+  currency: string;
+  balance: string;
+  locked: string;
+  average_price?: string;
+  unit_currency?: string;
+};
+type MemberTrade = {
+  id: string;
+  market: string;
+  side?: string;
+  quantity?: string;
+  entry_price?: string;
+  exit_price?: string;
+  net_pnl_krw?: string;
+  return_pct?: string;
+  closed_at?: string;
+  status?: string;
+};
 
 export default function MemberDashboardPage() {
   const router = useRouter();
@@ -17,19 +36,40 @@ export default function MemberDashboardPage() {
   const [mfaSecret, setMfaSecret] = useState('');
   const [mfaCode, setMfaCode] = useState('');
   const [memberSummary, setMemberSummary] = useState<{ trade_count: number; realized_pnl_krw: string; win_rate: string | null } | null>(null);
-  const [memberBalances, setMemberBalances] = useState<{ currency: string; balance: string; locked: string }[]>([]);
+  const [memberBalances, setMemberBalances] = useState<MemberBalance[]>([]);
+  const [memberTrades, setMemberTrades] = useState<MemberTrade[]>([]);
+  const [bithumbPrices, setBithumbPrices] = useState<Record<string, number>>({});
+  const [upbitPrices, setUpbitPrices] = useState<Record<string, number>>({});
   const [msg, setMsg] = useState('');
   const [err, setErr] = useState('');
 
   async function load() {
-    const s = await fetch('/api/manual/auth/session').then((r) => r.json()).catch(() => null);
+    const [s, c, a, bal, tr, bt, ut] = await Promise.all([
+      fetch('/api/manual/auth/session').then((r) => r.json()).catch(() => null),
+      fetch('/api/manual/member/credentials').then((r) => (r.ok ? r.json() : { items: [] })).catch(() => ({ items: [] })),
+      fetch('/api/manual/member/analytics').then((r) => (r.ok ? r.json() : null)).catch(() => null),
+      fetch('/api/manual/member/accounts').then((r) => (r.ok ? r.json() : { items: [] })).catch(() => ({ items: [] })),
+      fetch('/api/manual/member/trades?page=1&page_size=20').then((r) => (r.ok ? r.json() : { items: [] })).catch(() => ({ items: [] })),
+      fetch('/api/manual/public/market/tickers?limit=300').then((r) => (r.ok ? r.json() : { items: [] })).catch(() => ({ items: [] })),
+      fetch('/api/manual/public/exchanges/tickers?exchange=upbit&limit=200').then((r) => (r.ok ? r.json() : { items: [] })).catch(() => ({ items: [] })),
+    ]);
     setSession(s);
-    const c = await fetch('/api/manual/member/credentials').then((r) => (r.ok ? r.json() : { items: [] })).catch(() => ({ items: [] }));
     setCreds(c.items ?? []);
-    const a = await fetch('/api/manual/member/analytics').then((r) => (r.ok ? r.json() : null)).catch(() => null);
     if (a?.summary) setMemberSummary(a.summary);
-    const bal = await fetch('/api/manual/member/accounts').then((r) => (r.ok ? r.json() : { items: [] })).catch(() => ({ items: [] }));
     setMemberBalances(bal.items ?? []);
+    setMemberTrades(tr.items ?? []);
+    const bMap: Record<string, number> = {};
+    for (const t of bt?.items ?? []) {
+      const p = Number(t.trade_price ?? 0);
+      if (t.market && p > 0) bMap[t.market] = p;
+    }
+    setBithumbPrices(bMap);
+    const uMap: Record<string, number> = {};
+    for (const t of ut?.items ?? []) {
+      const p = Number(t.trade_price ?? 0);
+      if (t.market && p > 0) uMap[t.market] = p;
+    }
+    setUpbitPrices(uMap);
   }
 
   async function syncMemberAccount() {
@@ -45,7 +85,7 @@ export default function MemberDashboardPage() {
       setErr(d.detail || d.error || '동기화 실패');
       return;
     }
-    setMsg(`내 계좌 동기화 완료 (조회 자산 ${d.accounts_count ?? 0}종)`);
+    setMsg(`내 계좌 동기화 완료 (조회 자산 ${d.accounts_count ?? 0}종 · 신규 체결 ${d.inserted_fills ?? 0}건)`);
     load();
   }
 
@@ -160,12 +200,98 @@ export default function MemberDashboardPage() {
             </div>
           </div>
           {memberBalances.length > 0 && (
-            <div className="mt-3 flex flex-wrap gap-2 font-mono text-[11px] text-zinc-300">
-              {memberBalances.map((b) => (
-                <span key={b.currency} className="rounded border border-[#1E2536] bg-[#0E1119] px-2.5 py-1">
-                  {b.currency}: {Number(b.balance).toLocaleString('ko-KR', { maximumFractionDigits: 6 })}
-                </span>
-              ))}
+            <div className="mt-4 overflow-x-auto rounded-lg border border-[#1E2536] bg-[#0E1119]">
+              <table className="w-full text-left font-mono text-[11px]">
+                <thead className="border-b border-[#1E2536] text-zinc-400">
+                  <tr>
+                    <th className="px-3 py-2">거래소/자산</th>
+                    <th className="px-3 py-2 text-right">보유 수량</th>
+                    <th className="px-3 py-2 text-right">평균 매수가</th>
+                    <th className="px-3 py-2 text-right">현재가</th>
+                    <th className="px-3 py-2 text-right">평가손익</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-[#1E2536]/60">
+                  {memberBalances.map((b) => {
+                    const isUpbit = b.currency.startsWith('UPBIT:');
+                    const sym = isUpbit ? b.currency.slice(6) : b.currency;
+                    const qty = Number(b.balance) + Number(b.locked ?? 0);
+                    const avg = Number(b.average_price ?? 0);
+                    const market = `KRW-${sym}`;
+                    const curPrice = sym === 'KRW' ? 0 : (isUpbit ? upbitPrices[market] : bithumbPrices[market]) ?? 0;
+                    const hasLivePnl = sym !== 'KRW' && curPrice > 0 && avg > 0 && qty > 0;
+                    const pnlKrw = hasLivePnl ? (curPrice - avg) * qty : 0;
+                    const pnlPct = hasLivePnl ? ((curPrice - avg) / avg) * 100 : 0;
+                    return (
+                      <tr key={b.currency}>
+                        <td className="px-3 py-2 text-zinc-200">
+                          <span className="mr-1.5 rounded bg-[#181E2B] px-1.5 py-0.5 text-[10px] text-zinc-400">
+                            {isUpbit ? 'UPBIT' : 'BITHUMB'}
+                          </span>
+                          {sym}
+                        </td>
+                        <td className="px-3 py-2 text-right text-zinc-200">
+                          {qty.toLocaleString('ko-KR', { maximumFractionDigits: 6 })}
+                        </td>
+                        <td className="px-3 py-2 text-right text-zinc-400">
+                          {avg > 0 ? `${avg.toLocaleString('ko-KR', { maximumFractionDigits: 2 })}원` : '—'}
+                        </td>
+                        <td className="px-3 py-2 text-right text-zinc-200">
+                          {curPrice > 0 ? `${curPrice.toLocaleString('ko-KR', { maximumFractionDigits: 2 })}원` : '—'}
+                        </td>
+                        <td className={`px-3 py-2 text-right font-semibold ${!hasLivePnl ? 'text-zinc-500' : pnlKrw >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                          {hasLivePnl
+                            ? `${pnlKrw >= 0 ? '+' : ''}${Math.round(pnlKrw).toLocaleString('ko-KR')}원 (${pnlPct >= 0 ? '+' : ''}${pnlPct.toFixed(2)}%)`
+                            : '—'}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </section>
+
+        {/* 내 최근 거래 내역 */}
+        <section className="rounded-xl border border-[#1E2536] bg-[#121620] p-6 text-xs">
+          <div className="flex items-center justify-between">
+            <h2 className="text-base font-semibold">내 최근 거래 내역</h2>
+            <span className="font-mono text-[11px] text-zinc-400">최근 {memberTrades.length}건</span>
+          </div>
+          {memberTrades.length === 0 ? (
+            <p className="mt-3 text-zinc-500">동기화된 거래 내역이 없습니다. API 키 저장 후 &apos;내 계좌 동기화&apos;를 실행하세요.</p>
+          ) : (
+            <div className="mt-3 overflow-x-auto rounded-lg border border-[#1E2536] bg-[#0E1119]">
+              <table className="w-full text-left font-mono text-[11px]">
+                <thead className="border-b border-[#1E2536] text-zinc-400">
+                  <tr>
+                    <th className="px-3 py-2">마켓</th>
+                    <th className="px-3 py-2 text-right">수량</th>
+                    <th className="px-3 py-2 text-right">진입가</th>
+                    <th className="px-3 py-2 text-right">청산가</th>
+                    <th className="px-3 py-2 text-right">실현손익</th>
+                    <th className="px-3 py-2 text-right">시각</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-[#1E2536]/60">
+                  {memberTrades.map((t) => {
+                    const pnl = Number(t.net_pnl_krw ?? 0);
+                    return (
+                      <tr key={t.id}>
+                        <td className="px-3 py-2 text-zinc-200">{t.market}</td>
+                        <td className="px-3 py-2 text-right text-zinc-300">{t.quantity ?? '—'}</td>
+                        <td className="px-3 py-2 text-right text-zinc-400">{t.entry_price ? `${Number(t.entry_price).toLocaleString('ko-KR')}원` : '—'}</td>
+                        <td className="px-3 py-2 text-right text-zinc-300">{t.exit_price ? `${Number(t.exit_price).toLocaleString('ko-KR')}원` : '—'}</td>
+                        <td className={`px-3 py-2 text-right font-semibold ${pnl >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                          {t.net_pnl_krw != null ? `${pnl >= 0 ? '+' : ''}${Math.round(pnl).toLocaleString('ko-KR')}원` : '—'}
+                        </td>
+                        <td className="px-3 py-2 text-right text-zinc-500">{t.closed_at ? t.closed_at.slice(0, 16).replace('T', ' ') : '—'}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
             </div>
           )}
         </section>
