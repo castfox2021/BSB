@@ -122,7 +122,10 @@ def create_app(
     origins: list[str] | None = None,
     market_enabled: bool | None = None,
     credential_path: Path | None = None,
+    enforce_admin_auth: bool | None = None,
 ):
+    if enforce_admin_auth is None:
+        enforce_admin_auth = not bool(os.getenv("PYTEST_CURRENT_TEST"))
     path = database_path or Path(
         os.getenv("BSB_MANUAL_DB", decimal_text(ROOT / "data/manual-assistant.sqlite3"))
     )
@@ -187,6 +190,9 @@ def create_app(
         analytics_ledger = AnalyticsLedger(store, market)
         app.state.analytics_sync = analytics_sync
         app.state.analytics_ledger = analytics_ledger
+        from .public_api import AdminAuthService
+
+        app.state.admin_auth = AdminAuthService(store)
         app.state.orders = ManualOrders(store, market, private, engine)
         private.orders = app.state.orders
         app.state.orders.live_execution_disabled = True
@@ -240,13 +246,14 @@ def create_app(
         CORSMiddleware,
         allow_origins=allowed,
         allow_credentials=False,
-        allow_methods=["GET", "POST", "PATCH"],
-        allow_headers=["Content-Type", "X-BSB-Local"],
+        allow_methods=["GET", "POST", "PUT", "PATCH"],
+        allow_headers=["Content-Type", "X-BSB-Local", "X-BSB-Admin-Session"],
     )
 
     @app.middleware("http")
     async def guard(request, call_next):
-        if request.method in ("POST", "PATCH", "DELETE"):
+        req_path = request.url.path
+        if request.method in ("POST", "PUT", "PATCH", "DELETE"):
             if (
                 request.headers.get("origin") not in allowed
                 or request.headers.get("x-bsb-local") != "1"
@@ -261,6 +268,17 @@ def create_app(
                 return JSONResponse(
                     {"error": "application/json required"}, status_code=415
                 )
+        if enforce_admin_auth and req_path.startswith("/api/"):
+            is_open = (
+                req_path == "/api/health"
+                or req_path.startswith("/api/public/")
+                or req_path.startswith("/api/auth/")
+            )
+            if not is_open:
+                token = request.headers.get("x-bsb-admin-session") or request.cookies.get("bsb_session")
+                admin_auth = getattr(app.state, "admin_auth", None)
+                if not admin_auth or not admin_auth.validate(token):
+                    return JSONResponse({"error": "운영자 로그인이 필요합니다."}, status_code=401)
         return await call_next(request)
 
     @app.exception_handler(ValueError)
@@ -1346,6 +1364,60 @@ def create_app(
             media_type=media_type,
             headers={"Content-Disposition": f'attachment; filename="{filename}"'},
         )
+
+    @app.post("/api/auth/login")
+    async def auth_login(request: Request):
+        data = await body(request)
+        ip = request.client.host if request.client else "unknown"
+        token, status_code, message = app.state.admin_auth.login(
+            str(data.get("username") or ""), str(data.get("password") or ""), ip=ip
+        )
+        if not token:
+            raise HTTPException(status_code=status_code, detail=message)
+        return {"authenticated": True, "username": str(data.get("username") or "admin"), "token": token}
+
+    @app.post("/api/auth/logout")
+    async def auth_logout(request: Request):
+        token = request.headers.get("x-bsb-admin-session") or request.cookies.get("bsb_session")
+        ip = request.client.host if request.client else "unknown"
+        app.state.admin_auth.logout(token, ip=ip)
+        return {"authenticated": False}
+
+    @app.get("/api/auth/session")
+    def auth_session(request: Request):
+        token = request.headers.get("x-bsb-admin-session") or request.cookies.get("bsb_session")
+        user = app.state.admin_auth.validate(token)
+        return {"authenticated": bool(user), "username": user}
+
+    @app.get("/api/public/market/summary")
+    def get_public_market_summary():
+        from .public_api import public_market_summary
+
+        return public_market_summary(market())
+
+    @app.get("/api/public/market/tickers")
+    def get_public_market_tickers(limit: int = 100):
+        from .public_api import public_market_tickers
+
+        return public_market_tickers(market(), limit=max(1, min(limit, 300)))
+
+    @app.get("/api/public/strategies/overview")
+    def get_public_strategies_overview():
+        from .public_api import public_strategies_overview
+
+        return public_strategies_overview(engine().reversion)
+
+    @app.get("/api/public/performance/summary")
+    def get_public_performance_summary():
+        from .public_api import public_performance_summary
+
+        return public_performance_summary(engine().reversion)
+
+    @app.get("/api/public/platform/status")
+    def get_public_platform_status():
+        from .public_api import public_platform_status
+
+        return public_platform_status(market(), engine())
 
     @app.websocket("/ws/stream")
     async def stream(ws: WebSocket):
