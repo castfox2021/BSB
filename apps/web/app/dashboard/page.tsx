@@ -15,6 +15,7 @@ type MemberBalance = {
 type MemberTrade = {
   id: string;
   market: string;
+  exchange?: string | null;
   allocated_quantity?: string;
   allocated_cost?: string;
   allocated_proceeds?: string;
@@ -58,6 +59,8 @@ export default function MemberDashboardPage() {
   const [byCoin, setByCoin] = useState<CoinStat[]>([]);
   const [memberBalances, setMemberBalances] = useState<MemberBalance[]>([]);
   const [memberTrades, setMemberTrades] = useState<MemberTrade[]>([]);
+  const [tradesPage, setTradesPage] = useState(1);
+  const [tradesTotal, setTradesTotal] = useState(0);
   const [openOrders, setOpenOrders] = useState<{ exchange: string; uuid: string; market: string; side: string; price: string; remaining_volume: string; created_at: string }[]>([]);
   const [watchingItems, setWatchingItems] = useState<{ symbol: string; coin_name: string; drops: string[]; base_bars: number }[]>([]);
   const [activeSessions, setActiveSessions] = useState<{ ip: string; created_at: string; is_current: boolean }[]>([]);
@@ -84,7 +87,7 @@ export default function MemberDashboardPage() {
       fetch('/api/manual/member/credentials').then((r) => (r.ok ? r.json() : { items: [] })).catch(() => ({ items: [] })),
       fetch(`/api/manual/member/analytics?exchange=${ex}`).then((r) => (r.ok ? r.json() : null)).catch(() => null),
       fetch('/api/manual/member/accounts').then((r) => (r.ok ? r.json() : { items: [] })).catch(() => ({ items: [] })),
-      fetch(`/api/manual/member/trades?page=1&page_size=20&exchange=${ex}`).then((r) => (r.ok ? r.json() : { items: [] })).catch(() => ({ items: [] })),
+      fetch(`/api/manual/member/trades?page=1&page_size=20&exchange=${ex}`).then((r) => (r.ok ? r.json() : { items: [], total: 0 })).catch(() => ({ items: [], total: 0 })),
       fetch('/api/manual/member/open-orders').then((r) => (r.ok ? r.json() : { items: [] })).catch(() => ({ items: [] })),
       fetch('/api/manual/member/sessions').then((r) => (r.ok ? r.json() : { items: [] })).catch(() => ({ items: [] })),
     ]);
@@ -94,6 +97,8 @@ export default function MemberDashboardPage() {
     setByCoin(a?.charts?.by_market ?? []);
     setMemberBalances(bal.items ?? []);
     setMemberTrades(tr.items ?? []);
+    setTradesPage(1);
+    setTradesTotal(Number(tr.total ?? (tr.items ?? []).length));
     setOpenOrders(oo.items ?? []);
     setActiveSessions(sess.items ?? []);
     await refreshPrices();
@@ -103,11 +108,22 @@ export default function MemberDashboardPage() {
     setExFilter(ex);
     const [a, tr] = await Promise.all([
       fetch(`/api/manual/member/analytics?exchange=${ex}`).then((r) => (r.ok ? r.json() : null)).catch(() => null),
-      fetch(`/api/manual/member/trades?page=1&page_size=20&exchange=${ex}`).then((r) => (r.ok ? r.json() : { items: [] })).catch(() => ({ items: [] })),
+      fetch(`/api/manual/member/trades?page=1&page_size=20&exchange=${ex}`).then((r) => (r.ok ? r.json() : { items: [], total: 0 })).catch(() => ({ items: [], total: 0 })),
     ]);
     if (a?.summary) setMemberSummary(a.summary);
     setByCoin(a?.charts?.by_market ?? []);
     setMemberTrades(tr.items ?? []);
+    setTradesPage(1);
+    setTradesTotal(Number(tr.total ?? (tr.items ?? []).length));
+  }
+
+  async function loadTradesPage(nextPage: number) {
+    const tr = await fetch(`/api/manual/member/trades?page=${nextPage}&page_size=20&exchange=${exFilter}`)
+      .then((r) => (r.ok ? r.json() : { items: [], total: 0 }))
+      .catch(() => ({ items: [], total: 0 }));
+    setTradesPage(nextPage);
+    setMemberTrades(tr.items ?? []);
+    setTradesTotal(Number(tr.total ?? (tr.items ?? []).length));
   }
 
   async function syncMemberAccount() {
@@ -510,8 +526,31 @@ export default function MemberDashboardPage() {
         <section className="rounded-xl border border-[#1E2536] bg-[#121620] p-6 text-xs">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <h2 className="text-base font-semibold">내 최근 거래 내역</h2>
-            <div className="flex items-center gap-2 font-mono text-[11px]">
-              <span className="text-zinc-400">최근 {memberTrades.length}건</span>
+            <div className="flex flex-wrap items-center gap-2 font-mono text-[11px]">
+              <span className="text-zinc-400">총 {tradesTotal}건</span>
+              {tradesTotal > 20 && (
+                <div className="flex items-center gap-1">
+                  <button
+                    type="button"
+                    disabled={tradesPage <= 1}
+                    onClick={() => loadTradesPage(tradesPage - 1)}
+                    className="rounded border border-[#2A344B] bg-[#181E2B] px-2 py-1 text-zinc-200 disabled:opacity-40"
+                  >
+                    이전
+                  </button>
+                  <span className="px-1.5 text-zinc-400">
+                    {tradesPage} / {Math.max(1, Math.ceil(tradesTotal / 20))}
+                  </span>
+                  <button
+                    type="button"
+                    disabled={tradesPage >= Math.ceil(tradesTotal / 20)}
+                    onClick={() => loadTradesPage(tradesPage + 1)}
+                    className="rounded border border-[#2A344B] bg-[#181E2B] px-2 py-1 text-zinc-200 disabled:opacity-40"
+                  >
+                    다음
+                  </button>
+                </div>
+              )}
               <a
                 href={`/api/manual/member/export?format=csv&exchange=${exFilter}`}
                 className="rounded border border-[#2A344B] bg-[#181E2B] px-2.5 py-1 text-zinc-200 hover:border-zinc-400"
@@ -533,6 +572,7 @@ export default function MemberDashboardPage() {
               <table className="w-full text-left font-mono text-[11px]">
                 <thead className="border-b border-[#1E2536] text-zinc-400">
                   <tr>
+                    <th className="px-3 py-2">거래소</th>
                     <th className="px-3 py-2">마켓</th>
                     <th className="px-3 py-2 text-right">수량</th>
                     <th className="px-3 py-2 text-right">진입가</th>
@@ -547,8 +587,22 @@ export default function MemberDashboardPage() {
                     const entryP = qty > 0 && t.allocated_cost ? Number(t.allocated_cost) / qty : 0;
                     const exitP = qty > 0 && t.allocated_proceeds ? Number(t.allocated_proceeds) / qty : 0;
                     const pnl = Number(t.realized_pnl ?? 0);
+                    const exLabel = (t.exchange ?? '').toUpperCase() || '—';
                     return (
                       <tr key={t.id}>
+                        <td className="px-3 py-2">
+                          <span
+                            className={`rounded px-1.5 py-0.5 text-[10px] font-semibold ${
+                              exLabel === 'UPBIT'
+                                ? 'bg-sky-500/15 text-sky-300'
+                                : exLabel === 'BITHUMB'
+                                  ? 'bg-amber-500/15 text-amber-300'
+                                  : 'bg-zinc-700/40 text-zinc-400'
+                            }`}
+                          >
+                            {exLabel}
+                          </span>
+                        </td>
                         <td className="px-3 py-2 text-zinc-200">{t.market}</td>
                         <td className="px-3 py-2 text-right text-zinc-300">{t.allocated_quantity ?? '—'}</td>
                         <td className="px-3 py-2 text-right text-zinc-400">{entryP > 0 ? `${Math.round(entryP).toLocaleString('ko-KR')}원` : '—'}</td>
