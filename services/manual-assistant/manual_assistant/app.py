@@ -228,10 +228,28 @@ def create_app(
                 "UPDATE lab_jobs SET status='INTERRUPTED',error='프로그램 재시작으로 중단됨' WHERE status IN ('QUEUED','RUNNING')"
             )
         async with market.start(), private.start():
+            import ctypes
+            import gc
+            from concurrent.futures import ThreadPoolExecutor
+
+            loop = asyncio.get_running_loop()
+            io_executor = ThreadPoolExecutor(max_workers=6, thread_name_prefix="bsb-io")
+            loop.set_default_executor(io_executor)
+
+            async def _memory_trim_loop():
+                while True:
+                    await asyncio.sleep(300)
+                    gc.collect()
+                    try:
+                        ctypes.CDLL("libc.so.6").malloc_trim(0)
+                    except Exception:
+                        pass
+
             evaluator = asyncio.create_task(engine.run())
             order_monitor = asyncio.create_task(app.state.orders.run())
             automation_runner = asyncio.create_task(app.state.automation.run())
             analytics_task = asyncio.create_task(analytics_sync.run())
+            trim_task = asyncio.create_task(_memory_trim_loop())
             try:
                 yield
             finally:
@@ -239,6 +257,7 @@ def create_app(
                 order_monitor.cancel()
                 automation_runner.cancel()
                 analytics_task.cancel()
+                trim_task.cancel()
                 for task in jobs:
                     task.cancel()
                 await asyncio.gather(
@@ -246,9 +265,11 @@ def create_app(
                     order_monitor,
                     automation_runner,
                     analytics_task,
+                    trim_task,
                     *jobs,
                     return_exceptions=True,
                 )
+                io_executor.shutdown(wait=False)
 
     app = FastAPI(title="Bithumb Manual Trading Strategy Lab", lifespan=lifespan)
     app.add_middleware(TrustedHostMiddleware, allowed_hosts=["localhost", "127.0.0.1"])

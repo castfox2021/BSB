@@ -47,7 +47,7 @@ class RollingScanner:
             self.duplicates += 1
             return False
         self.seen[eid] = None
-        while len(self.seen) > 100000:
+        while len(self.seen) > 20000:
             self.seen.popitem(last=False)
         from .candles import epoch
 

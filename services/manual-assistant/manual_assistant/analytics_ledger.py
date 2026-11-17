@@ -476,23 +476,40 @@ class AnalyticsLedger:
                 issues = []
             else:
                 lots = []
-                lot_q = "SELECT * FROM trade_lot_allocations"
-                lot_params: tuple = ()
+                clauses: list[str] = []
+                params: list = []
                 if account_f:
-                    lot_q = "SELECT l.* FROM trade_lot_allocations l JOIN trade_positions p ON l.position_id=p.id WHERE p.account_id=?"
-                    lot_params = (account_f,)
-                for r in conn.execute(f"{lot_q} ORDER BY closed_at ASC", lot_params).fetchall():
+                    lot_base = "SELECT l.* FROM trade_lot_allocations l JOIN trade_positions p ON l.position_id=p.id"
+                    clauses.append("p.account_id=?")
+                    params.append(account_f)
+                    col_prefix = "l."
+                else:
+                    lot_base = "SELECT * FROM trade_lot_allocations"
+                    col_prefix = ""
+                if start_utc:
+                    clauses.append(f"{col_prefix}closed_at>=?")
+                    params.append(start_utc.isoformat())
+                if end_utc:
+                    clauses.append(f"{col_prefix}closed_at<=?")
+                    params.append(end_utc.isoformat())
+                if market_f != "ALL":
+                    clauses.append(f"{col_prefix}market=?")
+                    params.append(market_f)
+                if origin_f != "ALL":
+                    clauses.append(f"{col_prefix}execution_origin=?")
+                    params.append(origin_f)
+                if strategy_f != "ALL":
+                    clauses.append(f"{col_prefix}strategy_name=?")
+                    params.append(strategy_f)
+                where_sql = f" WHERE {' AND '.join(clauses)}" if clauses else ""
+                for r in conn.execute(
+                    f"{lot_base}{where_sql} ORDER BY {col_prefix}closed_at ASC", tuple(params)
+                ):
                     d = dict(r)
                     closed_dt = datetime.fromisoformat(d["closed_at"])
                     if start_utc and closed_dt < start_utc:
                         continue
                     if end_utc and closed_dt > end_utc:
-                        continue
-                    if market_f != "ALL" and d["market"] != market_f:
-                        continue
-                    if origin_f != "ALL" and d["execution_origin"] != origin_f:
-                        continue
-                    if strategy_f != "ALL" and d["strategy_name"] != strategy_f:
                         continue
                     pnl = _d(d["realized_pnl"])
                     if outcome_f == "WIN" and pnl <= 0:

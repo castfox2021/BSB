@@ -467,26 +467,22 @@ class Market:
         return held, ((selected | requested) - held)
 
     def detail_analysis(self, symbol, book, is_candidate):
-        from .review_events import append_event, archive_candles
+        from .review_events import append_event
 
-        with self.market_store.connect() as mconn:
-            recent_candles = mconn.execute(
-                "SELECT * FROM market_candles WHERE symbol=? AND timeframe=60 ORDER BY start DESC LIMIT 2",
-                (symbol,),
-            ).fetchall()
+        compact_book = {
+            "symbol": book.get("symbol"),
+            "bids": (book.get("bids") or [])[:5],
+            "asks": (book.get("asks") or [])[:5],
+            "exchange_at": book.get("exchange_at"),
+        }
         with self.store.connect() as conn:
-            archive_candles(
-                conn,
-                recent_candles,
-                source="WS_DETAIL_SNAPSHOT",
-            )
             append_event(
                 conn,
                 "BOOK",
                 f"{symbol}:{int(time.time()) // 60}",
                 symbol,
                 datetime.now(UTC).isoformat(),
-                {"orderbook": book, "candidate": is_candidate},
+                {"orderbook": compact_book, "candidate": is_candidate},
             )
         bars = self.book.load_contiguous(symbol, limit=100)
         contiguous = (
@@ -586,9 +582,14 @@ class Market:
                 await asyncio.to_thread(self.save_early_signals, early)
                 for row in early:
                     signaled[row["symbol"]] = minute
-            interval = 10 if self.overloaded else 2
+            interval = 15 if self.overloaded else 5
             if wake - self.last_detail_analysis >= interval:
                 self.last_detail_analysis = wake
+                stale_syms = [
+                    s for s, d in self.detail_cache.items() if wake - d.get("at", 0) > 60
+                ]
+                for s in stale_syms:
+                    self.detail_cache.pop(s, None)
                 started = time.perf_counter()
                 flags = {r["symbol"]: r["candidate"] for r in self.rows}
                 batch = []
@@ -792,11 +793,18 @@ class Market:
         self.unavailable.update(previous - set(universe))
         self.unavailable.difference_update(universe)
         self.universe = universe
+        universe_set = set(universe)
         self.market_metadata = {
             m["market"]: m
             for m in markets
-            if isinstance(m, dict) and m.get("market") in set(universe)
+            if isinstance(m, dict) and m.get("market") in universe_set
         }
+        for stale in previous - universe_set:
+            self.latest.pop(stale, None)
+            self.detail_cache.pop(stale, None)
+            self.seeds.pop(stale, None)
+            self.received_at.pop(stale, None)
+            self.rolling.buckets.pop(stale, None)
         self.last_universe_refresh = datetime.now(UTC).isoformat()
         for symbol in universe:
             if symbol not in previous:

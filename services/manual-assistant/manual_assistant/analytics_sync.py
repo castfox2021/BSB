@@ -277,7 +277,15 @@ class AnalyticsSyncService:
         bot_uuids = self._bot_client_order_ids(conn)
         inserted_orders = 0
         inserted_fills = 0
-        for o in conn.execute("SELECT * FROM private_orders").fetchall():
+        last_ord_at = conn.execute(
+            "SELECT max(updated_at) FROM exchange_orders WHERE data_source='BITHUMB_API'"
+        ).fetchone()[0]
+        ord_cur = (
+            conn.execute("SELECT * FROM private_orders WHERE updated_at >= ?", (last_ord_at,))
+            if last_ord_at
+            else conn.execute("SELECT * FROM private_orders")
+        )
+        for o in ord_cur:
             od = dict(o)
             origin = "BOT" if od["order_id"] in bot_uuids else "MANUAL"
             conn.execute(
@@ -308,7 +316,15 @@ class AnalyticsSyncService:
             )
             inserted_orders += conn.execute("SELECT changes()").fetchone()[0]
 
-        for f in conn.execute("SELECT * FROM private_fills").fetchall():
+        last_fill_at = conn.execute(
+            "SELECT max(filled_at) FROM exchange_fills WHERE data_source='BITHUMB_API'"
+        ).fetchone()[0]
+        fill_cur = (
+            conn.execute("SELECT * FROM private_fills WHERE filled_at >= ?", (last_fill_at,))
+            if last_fill_at
+            else conn.execute("SELECT * FROM private_fills")
+        )
+        for f in fill_cur:
             fd = dict(f)
             origin = "BOT" if fd["order_id"] in bot_uuids else "MANUAL"
             qty = D(str(fd["quantity"]))
