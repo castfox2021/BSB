@@ -25,6 +25,23 @@ type MemberTrade = {
   status?: string;
 };
 
+type CoinStat = {
+  market: string;
+  trade_count: number;
+  realized_pnl_krw: string;
+  win_rate?: string | null;
+};
+
+function parseTickerPrices(items: { symbol?: string; market?: string; price?: string | null; trade_price?: string | number | null }[]): Record<string, number> {
+  const out: Record<string, number> = {};
+  for (const t of items) {
+    const sym = t.symbol ?? t.market;
+    const p = Number(t.price ?? t.trade_price ?? 0);
+    if (sym && p > 0) out[sym] = p;
+  }
+  return out;
+}
+
 export default function MemberDashboardPage() {
   const router = useRouter();
   const [session, setSession] = useState<{ username?: string; role?: string; mfa_enabled?: boolean } | null>(null);
@@ -36,6 +53,7 @@ export default function MemberDashboardPage() {
   const [mfaSecret, setMfaSecret] = useState('');
   const [mfaCode, setMfaCode] = useState('');
   const [memberSummary, setMemberSummary] = useState<{ trade_count: number; realized_pnl_krw: string; win_rate: string | null } | null>(null);
+  const [byCoin, setByCoin] = useState<CoinStat[]>([]);
   const [memberBalances, setMemberBalances] = useState<MemberBalance[]>([]);
   const [memberTrades, setMemberTrades] = useState<MemberTrade[]>([]);
   const [bithumbPrices, setBithumbPrices] = useState<Record<string, number>>({});
@@ -43,33 +61,30 @@ export default function MemberDashboardPage() {
   const [msg, setMsg] = useState('');
   const [err, setErr] = useState('');
 
+  async function refreshPrices() {
+    const [bt, ut] = await Promise.all([
+      fetch('/api/manual/public/market/tickers?limit=300').then((r) => (r.ok ? r.json() : { items: [] })).catch(() => ({ items: [] })),
+      fetch('/api/manual/public/exchanges/tickers?exchange=upbit&limit=200').then((r) => (r.ok ? r.json() : { items: [] })).catch(() => ({ items: [] })),
+    ]);
+    setBithumbPrices(parseTickerPrices(bt?.items ?? []));
+    setUpbitPrices(parseTickerPrices(ut?.items ?? []));
+  }
+
   async function load() {
-    const [s, c, a, bal, tr, bt, ut] = await Promise.all([
+    const [s, c, a, bal, tr] = await Promise.all([
       fetch('/api/manual/auth/session').then((r) => r.json()).catch(() => null),
       fetch('/api/manual/member/credentials').then((r) => (r.ok ? r.json() : { items: [] })).catch(() => ({ items: [] })),
       fetch('/api/manual/member/analytics').then((r) => (r.ok ? r.json() : null)).catch(() => null),
       fetch('/api/manual/member/accounts').then((r) => (r.ok ? r.json() : { items: [] })).catch(() => ({ items: [] })),
       fetch('/api/manual/member/trades?page=1&page_size=20').then((r) => (r.ok ? r.json() : { items: [] })).catch(() => ({ items: [] })),
-      fetch('/api/manual/public/market/tickers?limit=300').then((r) => (r.ok ? r.json() : { items: [] })).catch(() => ({ items: [] })),
-      fetch('/api/manual/public/exchanges/tickers?exchange=upbit&limit=200').then((r) => (r.ok ? r.json() : { items: [] })).catch(() => ({ items: [] })),
     ]);
     setSession(s);
     setCreds(c.items ?? []);
     if (a?.summary) setMemberSummary(a.summary);
+    setByCoin(a?.by_coin ?? []);
     setMemberBalances(bal.items ?? []);
     setMemberTrades(tr.items ?? []);
-    const bMap: Record<string, number> = {};
-    for (const t of bt?.items ?? []) {
-      const p = Number(t.trade_price ?? 0);
-      if (t.market && p > 0) bMap[t.market] = p;
-    }
-    setBithumbPrices(bMap);
-    const uMap: Record<string, number> = {};
-    for (const t of ut?.items ?? []) {
-      const p = Number(t.trade_price ?? 0);
-      if (t.market && p > 0) uMap[t.market] = p;
-    }
-    setUpbitPrices(uMap);
+    await refreshPrices();
   }
 
   async function syncMemberAccount() {
@@ -91,6 +106,8 @@ export default function MemberDashboardPage() {
 
   useEffect(() => {
     load();
+    const timer = setInterval(refreshPrices, 10000);
+    return () => clearInterval(timer);
   }, []);
 
   async function saveCred(e: FormEvent) {
@@ -150,6 +167,29 @@ export default function MemberDashboardPage() {
     router.push('/login');
   }
 
+  let totalEvalKrw = 0;
+  let totalUnrealizedKrw = 0;
+  let hasUnrealized = false;
+  for (const b of memberBalances) {
+    const isUpbit = b.currency.startsWith('UPBIT:');
+    const sym = isUpbit ? b.currency.slice(6) : b.currency;
+    const qty = Number(b.balance) + Number(b.locked ?? 0);
+    if (sym === 'KRW') {
+      totalEvalKrw += qty;
+      continue;
+    }
+    const market = `KRW-${sym}`;
+    const curPrice = (isUpbit ? upbitPrices[market] : bithumbPrices[market]) ?? 0;
+    const avg = Number(b.average_price ?? 0);
+    if (curPrice > 0 && qty > 0) {
+      totalEvalKrw += curPrice * qty;
+      if (avg > 0) {
+        totalUnrealizedKrw += (curPrice - avg) * qty;
+        hasUnrealized = true;
+      }
+    }
+  }
+
   return (
     <div className="min-h-screen bg-[#0B0E14] text-zinc-100">
       <PublicHeader />
@@ -185,7 +225,17 @@ export default function MemberDashboardPage() {
               내 계좌 동기화
             </button>
           </div>
-          <div className="mt-4 grid grid-cols-3 gap-3 font-mono">
+          <div className="mt-4 grid grid-cols-2 gap-3 font-mono sm:grid-cols-5">
+            <div className="rounded-lg border border-[#1E2536] bg-[#0E1119] p-3">
+              <p className="text-zinc-400">총 보유 평가액</p>
+              <p className="mt-1 text-base font-semibold">{Math.round(totalEvalKrw).toLocaleString('ko-KR')}원</p>
+            </div>
+            <div className="rounded-lg border border-[#1E2536] bg-[#0E1119] p-3">
+              <p className="text-zinc-400">미실현 손익</p>
+              <p className={`mt-1 text-base font-semibold ${!hasUnrealized ? 'text-zinc-400' : totalUnrealizedKrw >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                {hasUnrealized ? `${totalUnrealizedKrw >= 0 ? '+' : ''}${Math.round(totalUnrealizedKrw).toLocaleString('ko-KR')}원` : '—'}
+              </p>
+            </div>
             <div className="rounded-lg border border-[#1E2536] bg-[#0E1119] p-3">
               <p className="text-zinc-400">거래 수</p>
               <p className="mt-1 text-base font-semibold">{memberSummary?.trade_count ?? 0}건</p>
@@ -199,6 +249,21 @@ export default function MemberDashboardPage() {
               <p className="mt-1 text-base font-semibold">{memberSummary?.win_rate ? `${memberSummary.win_rate}%` : '—'}</p>
             </div>
           </div>
+          {byCoin.length > 0 && (
+            <div className="mt-3 flex flex-wrap gap-2 font-mono text-[11px]">
+              {byCoin.slice(0, 8).map((c) => {
+                const pnl = Number(c.realized_pnl_krw ?? 0);
+                return (
+                  <span key={c.market} className="rounded border border-[#1E2536] bg-[#0E1119] px-2.5 py-1 text-zinc-300">
+                    {c.market.replace('KRW-', '')} ({c.trade_count}건){' '}
+                    <span className={pnl >= 0 ? 'text-emerald-400' : 'text-rose-400'}>
+                      {pnl >= 0 ? '+' : ''}{Math.round(pnl).toLocaleString('ko-KR')}원
+                    </span>
+                  </span>
+                );
+              })}
+            </div>
+          )}
           {memberBalances.length > 0 && (
             <div className="mt-4 overflow-x-auto rounded-lg border border-[#1E2536] bg-[#0E1119]">
               <table className="w-full text-left font-mono text-[11px]">
