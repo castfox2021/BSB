@@ -55,9 +55,13 @@ class Storage:
 
     @staticmethod
     def is_postgres_enabled() -> bool:
-        return os.environ.get("USE_POSTGRES") == "1" and bool(
-            (os.environ.get("DATABASE_URL") or "").strip()
-        )
+        if os.environ.get("USE_POSTGRES") != "1" or not (os.environ.get("DATABASE_URL") or "").strip():
+            return False
+        try:
+            import psycopg  # type: ignore  # noqa: F401
+            return True
+        except ImportError:
+            return False
 
     @contextmanager
     def identity_connect(self):
