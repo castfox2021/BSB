@@ -16,6 +16,7 @@ export default function MemberDashboardPage() {
   const [secretKey, setSecretKey] = useState('');
   const [mfaSecret, setMfaSecret] = useState('');
   const [mfaCode, setMfaCode] = useState('');
+  const [memberSummary, setMemberSummary] = useState<{ trade_count: number; realized_pnl_krw: string; win_rate: string | null } | null>(null);
   const [msg, setMsg] = useState('');
   const [err, setErr] = useState('');
 
@@ -24,6 +25,25 @@ export default function MemberDashboardPage() {
     setSession(s);
     const c = await fetch('/api/manual/member/credentials').then((r) => (r.ok ? r.json() : { items: [] })).catch(() => ({ items: [] }));
     setCreds(c.items ?? []);
+    const a = await fetch('/api/manual/member/analytics').then((r) => (r.ok ? r.json() : null)).catch(() => null);
+    if (a?.summary) setMemberSummary(a.summary);
+  }
+
+  async function syncMemberAccount() {
+    setErr('');
+    setMsg('');
+    const res = await fetch('/api/manual/member/sync', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: '{}',
+    });
+    const d = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      setErr(d.detail || d.error || '동기화 실패');
+      return;
+    }
+    setMsg(`내 계좌 동기화 완료 (조회 자산 ${d.accounts_count ?? 0}종)`);
+    load();
   }
 
   useEffect(() => {
@@ -110,6 +130,33 @@ export default function MemberDashboardPage() {
 
         {msg && <p className="text-xs font-medium text-emerald-400">{msg}</p>}
         {err && <p className="text-xs font-medium text-rose-400">{err}</p>}
+
+        {/* 내 개인 거래 통계 (격리 조회) */}
+        <section className="rounded-xl border border-[#1E2536] bg-[#121620] p-6 text-xs">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <h2 className="text-base font-semibold">내 개인 거래 통계</h2>
+              <p className="mt-1 text-zinc-400">회원 본인의 암호화 API 키로만 조회되며 타 회원·운영자 데이터와 완전히 격리됩니다.</p>
+            </div>
+            <button type="button" onClick={syncMemberAccount} className="rounded-lg border border-emerald-500/40 bg-emerald-500/15 px-3.5 py-2 font-semibold text-emerald-300">
+              내 계좌 동기화
+            </button>
+          </div>
+          <div className="mt-4 grid grid-cols-3 gap-3 font-mono">
+            <div className="rounded-lg border border-[#1E2536] bg-[#0E1119] p-3">
+              <p className="text-zinc-400">거래 수</p>
+              <p className="mt-1 text-base font-semibold">{memberSummary?.trade_count ?? 0}건</p>
+            </div>
+            <div className="rounded-lg border border-[#1E2536] bg-[#0E1119] p-3">
+              <p className="text-zinc-400">실현손익</p>
+              <p className="mt-1 text-base font-semibold">{Number(memberSummary?.realized_pnl_krw ?? '0').toLocaleString('ko-KR')}원</p>
+            </div>
+            <div className="rounded-lg border border-[#1E2536] bg-[#0E1119] p-3">
+              <p className="text-zinc-400">승률</p>
+              <p className="mt-1 text-base font-semibold">{memberSummary?.win_rate ? `${memberSummary.win_rate}%` : '—'}</p>
+            </div>
+          </div>
+        </section>
 
         {/* 암호화 API 키 금고 */}
         <section className="rounded-xl border border-[#1E2536] bg-[#121620] p-6 text-xs">

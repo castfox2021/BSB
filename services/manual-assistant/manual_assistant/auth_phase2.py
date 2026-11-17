@@ -275,3 +275,13 @@ class Phase2IdentityService:
                 (cred_id, user_id),
             )
             return conn.execute("SELECT changes()").fetchone()[0] > 0
+
+    def get_decrypted_credential(self, user_id: str, exchange: str = "BITHUMB") -> tuple[str, str] | None:
+        with self.store.connect() as conn:
+            row = conn.execute(
+                "SELECT access_key_enc, secret_key_enc FROM user_exchange_credentials WHERE user_id=? AND exchange=? ORDER BY created_at DESC LIMIT 1",
+                (user_id, exchange.upper()),
+            ).fetchone()
+            if not row:
+                return None
+            return decrypt_secret(row["access_key_enc"]), decrypt_secret(row["secret_key_enc"])

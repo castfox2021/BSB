@@ -86,6 +86,14 @@ export default function AiStrategyReport() {
   const [showQuality, setShowQuality] = useState(false);
   const [reports, setReports] = useState<ReportItem[]>([]);
   const [comparison, setComparison] = useState<ComparisonPolicy[] | null>(null);
+  const [proposalText, setProposalText] = useState('');
+  const [proposalDiff, setProposalDiff] = useState<{
+    valid: boolean;
+    auto_applied: boolean;
+    base_hash_match: boolean;
+    hypothesis: string;
+    diffs: { path: string; current: string; proposed: string }[];
+  } | null>(null);
 
   const filters = () => ({
     start_kst: startKst || null,
@@ -158,6 +166,18 @@ export default function AiStrategyReport() {
       setError(e instanceof Error ? e.message : '전략 비교 조회 실패');
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function previewProposal() {
+    setError('');
+    setProposalDiff(null);
+    try {
+      const parsed = JSON.parse(proposalText);
+      const res = await api<typeof proposalDiff>('admin/strategy-proposals/preview', 'POST', parsed);
+      setProposalDiff(res);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : '변경안 JSON 검증 실패');
     }
   }
 
@@ -390,6 +410,34 @@ export default function AiStrategyReport() {
           </div>
         </div>
       )}
+
+      {/* Phase E: ChatGPT 변경안 검증 미리보기 (자동 반영 안 함) */}
+      <div className="mt-5 border-t border-[#1E2536]/80 pt-4 text-xs">
+        <p className="font-semibold text-zinc-300">ChatGPT 전략 변경안 검증 미리보기 (`strategy_change_proposal.json`)</p>
+        <p className="mt-0.5 text-zinc-500">스키마·허용 범위·설정 차이만 검사하며, 서버 설정은 자동으로 변경하지 않습니다.</p>
+        <textarea
+          rows={4}
+          value={proposalText}
+          onChange={(e) => setProposalText(e.target.value)}
+          placeholder='{"proposal_schema":"bithumb-strategy-proposal/1.0","changes":[{"path":"entry_filters.drop_1m","to":"0.025"}]}'
+          className={`${inputCls} mt-2`}
+        />
+        <button type="button" onClick={previewProposal} className={`${btnCls} mt-2`}>
+          변경안 검증 및 차이 미리보기
+        </button>
+        {proposalDiff && (
+          <div className="mt-3 rounded-lg border border-[#1E2536] bg-[#0B0E14] p-3 font-mono text-[11px] text-zinc-300">
+            <p className="text-emerald-400">
+              검증 통과 · 자동 적용: {proposalDiff.auto_applied ? 'YES' : 'NO (읽기 전용)'} · 해시 일치: {proposalDiff.base_hash_match ? 'YES' : 'MISMATCH'}
+            </p>
+            {proposalDiff.diffs.map((d) => (
+              <p key={d.path} className="mt-1">
+                {d.path}: {d.current} → <strong className="text-zinc-100">{d.proposed}</strong>
+              </p>
+            ))}
+          </div>
+        )}
+      </div>
     </section>
   );
 }

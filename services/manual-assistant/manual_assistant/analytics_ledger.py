@@ -410,6 +410,7 @@ class AnalyticsLedger:
         strategy_f = str(filters.get("strategy") or "ALL")
         outcome_f = str(filters.get("outcome") or "ALL").upper()
         mode_f = str(filters.get("mode") or "LIVE").upper()  # LIVE | PAPER
+        account_f = filters.get("account_id")
 
         with self.store.connect() as conn:
             if mode_f == "PAPER":
@@ -475,9 +476,12 @@ class AnalyticsLedger:
                 issues = []
             else:
                 lots = []
-                for r in conn.execute(
-                    "SELECT * FROM trade_lot_allocations ORDER BY closed_at ASC"
-                ).fetchall():
+                lot_q = "SELECT * FROM trade_lot_allocations"
+                lot_params: tuple = ()
+                if account_f:
+                    lot_q = "SELECT l.* FROM trade_lot_allocations l JOIN trade_positions p ON l.position_id=p.id WHERE p.account_id=?"
+                    lot_params = (account_f,)
+                for r in conn.execute(f"{lot_q} ORDER BY closed_at ASC", lot_params).fetchall():
                     d = dict(r)
                     closed_dt = datetime.fromisoformat(d["closed_at"])
                     if start_utc and closed_dt < start_utc:
@@ -499,15 +503,21 @@ class AnalyticsLedger:
 
                 open_pos = [
                     dict(r)
-                    for r in conn.execute(
-                        "SELECT * FROM trade_positions WHERE status='OPEN'"
+                    for r in (
+                        conn.execute("SELECT * FROM trade_positions WHERE status='OPEN' AND account_id=?", (account_f,))
+                        if account_f
+                        else conn.execute("SELECT * FROM trade_positions WHERE status='OPEN'")
                     ).fetchall()
                 ]
+                fill_where = " AND account_id=?" if account_f else ""
+                fill_p = (account_f,) if account_f else ()
                 buy_fills = conn.execute(
-                    "SELECT fill_amount, fee_krw_equiv, filled_at, market, execution_origin FROM exchange_fills WHERE side='BUY'"
+                    f"SELECT fill_amount, fee_krw_equiv, filled_at, market, execution_origin FROM exchange_fills WHERE side='BUY'{fill_where}",
+                    fill_p,
                 ).fetchall()
                 sell_fills = conn.execute(
-                    "SELECT fill_amount, fee_krw_equiv, filled_at, market, execution_origin FROM exchange_fills WHERE side='SELL'"
+                    f"SELECT fill_amount, fee_krw_equiv, filled_at, market, execution_origin FROM exchange_fills WHERE side='SELL'{fill_where}",
+                    fill_p,
                 ).fetchall()
                 total_buy = sum((_d(b["fill_amount"]) for b in buy_fills), D(0))
                 total_sell = sum((_d(s["fill_amount"]) for s in sell_fills), D(0))

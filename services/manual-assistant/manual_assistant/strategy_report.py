@@ -883,3 +883,37 @@ class StrategyReportBuilder:
             return None
         p = Path(r["zip_path"])
         return p if p.is_file() else None
+
+    def preview_proposal(self, proposal: dict) -> dict:
+        if proposal.get("proposal_schema") != "bithumb-strategy-proposal/1.0":
+            raise ValueError("지원하지 않는 proposal_schema입니다 (bithumb-strategy-proposal/1.0 필요).")
+        with self.store.connect() as conn:
+            snap, cfg_hash = self._config_snapshot(conn)
+        allowed_paths = {
+            "take_profit.stages[0].trigger_pct": (D("0.003"), D("0.2"), snap["take_profit_stages"][0]["trigger_pct"]),
+            "take_profit.stages[1].trigger_pct": (D("0.005"), D("0.5"), snap["take_profit_stages"][1]["trigger_pct"]),
+            "trailing.drawdown_pct": (D("0.002"), D("0.1"), snap["trailing"]["drawdown_pct"]),
+            "initial_stop.maximum_stop_rate": (D("0.005"), D("0.05"), snap["initial_stop"]["maximum_stop_rate"]),
+            "entry_filters.drop_1m": (D("0.005"), D("0.2"), snap["entry_filters"].get("drop_1m", "0.02")),
+            "entry_filters.drop_3m": (D("0.005"), D("0.3"), snap["entry_filters"].get("drop_3m", "0.03")),
+            "entry_filters.drop_5m": (D("0.005"), D("0.4"), snap["entry_filters"].get("drop_5m", "0.04")),
+        }
+        diffs = []
+        for ch in proposal.get("changes") or []:
+            path = str(ch.get("path") or "")
+            if path not in allowed_paths:
+                raise ValueError(f"허용되지 않은 설정 경로입니다: {path}")
+            lo, hi, cur = allowed_paths[path]
+            val = _dec(ch.get("to"))
+            if val < lo or val > hi:
+                raise ValueError(f"{path} 허용 범위({lo}~{hi})를 벗어났습니다: {val}")
+            diffs.append({"path": path, "current": str(cur), "proposed": str(val)})
+        return {
+            "valid": True,
+            "auto_applied": False,
+            "base_hash_match": proposal.get("base_config_hash") == cfg_hash,
+            "current_config_hash": cfg_hash,
+            "hypothesis": str(proposal.get("hypothesis") or ""),
+            "risks": [str(r) for r in (proposal.get("risks") or [])],
+            "diffs": diffs,
+        }

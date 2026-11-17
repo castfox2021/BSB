@@ -1231,6 +1231,14 @@ def create_app(
         await body(request)
         return engine().reversion.get_exit_comparison()
 
+    @app.post("/api/admin/strategy-proposals/preview")
+    async def preview_strategy_proposal(request: Request):
+        data = await body(request)
+        try:
+            return app.state.report_builder.preview_proposal(data)
+        except ValueError as error:
+            raise HTTPException(status_code=400, detail=str(error)) from error
+
     @app.post("/api/analytics/sync")
     async def analytics_sync_trigger(request: Request):
         data = await body(request)
@@ -1498,6 +1506,31 @@ def create_app(
         if not app.state.identity.delete_credential(uid, cred_id):
             raise HTTPException(status_code=404, detail="키를 찾을 수 없습니다.")
         return {"deleted": True}
+
+    @app.post("/api/member/sync")
+    async def member_sync(request: Request):
+        await body(request)
+        uid, _ = _current_user(request)
+        creds_pair = app.state.identity.get_decrypted_credential(uid, "BITHUMB")
+        if not creds_pair:
+            raise HTTPException(status_code=400, detail="저장된 BITHUMB API 키가 없습니다.")
+        from .private_auth import Credentials
+        from .private_client import PrivateClient
+
+        client = PrivateClient(Credentials(creds_pair[0], creds_pair[1]))
+        try:
+            accounts = await client.get("/v1/accounts")
+            app.state.analytics_ledger.recalculate(f"member:{uid}")
+            return {"synced": True, "accounts_count": len(accounts) if isinstance(accounts, list) else 0}
+        finally:
+            await client.close()
+
+    @app.get("/api/member/analytics")
+    def member_analytics(request: Request):
+        uid, _ = _current_user(request)
+        return app.state.analytics_ledger.query_analytics(
+            {"mode": "LIVE", "period": "all", "account_id": f"member:{uid}"}
+        )
 
     @app.get("/api/public/exchanges/tickers")
     async def get_public_exchange_tickers(exchange: str = "bithumb", limit: int = 100):

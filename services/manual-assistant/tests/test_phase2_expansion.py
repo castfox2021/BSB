@@ -119,3 +119,28 @@ def test_totp_mfa_and_exchange_adapters(tmp_path):
 
         # Public exchange ticker endpoints
         assert client.get("/api/public/exchanges/tickers?exchange=bithumb").status_code == 200
+
+        # Member analytics endpoint is isolated and accessible to member
+        m_ana = client.get("/api/member/analytics", headers=h)
+        assert m_ana.status_code == 200
+        assert m_ana.json()["summary"]["trade_count"] == 0
+
+
+def test_strategy_proposal_preview_never_auto_applies(tmp_path):
+    app = create_app(tmp_path / "p2_prop.sqlite3", enforce_admin_auth=False)
+    with TestClient(app, base_url=ORIGIN) as client:
+        res = client.post(
+            "/api/admin/strategy-proposals/preview",
+            headers=HEADERS,
+            json={
+                "proposal_schema": "bithumb-strategy-proposal/1.0",
+                "hypothesis": "Test drop_1m tuning",
+                "changes": [{"path": "entry_filters.drop_1m", "to": "0.025"}],
+                "auto_apply": True,
+            },
+        )
+        assert res.status_code == 200
+        body = res.json()
+        assert body["valid"] is True
+        assert body["auto_applied"] is False
+        assert body["diffs"][0]["proposed"] == "0.025"
