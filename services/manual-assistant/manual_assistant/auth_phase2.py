@@ -162,8 +162,7 @@ class Phase2IdentityService:
                 "INSERT INTO users VALUES (?,?,?,?,?,?,?)",
                 (uid, clean_email, hash_password(password), "MEMBER", None, False, now_iso),
             )
-        with self.store.connect() as aconn:
-            self.store.audit(aconn, "member_registered", {"user_id": uid, "email": clean_email})
+        self.store.audit_event("member_registered", {"user_id": uid, "email": clean_email})
         return {"user_id": uid, "email": clean_email, "role": "MEMBER"}
 
     def authenticate_member(self, email: str, password: str, totp: str = "", ip: str = "unknown") -> tuple[dict | None, int, str]:

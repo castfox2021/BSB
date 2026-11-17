@@ -149,6 +149,18 @@ class Storage:
             ),
         )
 
+    def audit_event(self, kind: str, details: dict):
+        """Record an audit event to PostgreSQL (when USE_POSTGRES=1) or SQLite."""
+        if self.is_postgres_enabled():
+            try:
+                with self.identity_connect() as conn:
+                    self.audit(conn, kind, details)
+                return
+            except Exception:
+                pass
+        with self.connect() as conn:
+            self.audit(conn, kind, details)
+
     def settings(self):
         with self.connect() as conn:
             return {

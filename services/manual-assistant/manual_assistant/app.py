@@ -1215,13 +1215,17 @@ def create_app(
     @app.get("/api/admin/audit-logs")
     def get_admin_audit_logs(limit: int = 50):
         lim = max(1, min(limit, 200))
-        with store.connect() as conn:
+        with store.identity_connect() as conn:
             rows = [
                 {
                     "id": r["id"],
                     "type": r["type"],
-                    "details": json.loads(r["details_json"]),
-                    "created_at": r["created_at"],
+                    "details": (
+                        r["details_json"]
+                        if isinstance(r["details_json"], (dict, list))
+                        else json.loads(r["details_json"])
+                    ),
+                    "created_at": str(r["created_at"]),
                 }
                 for r in conn.execute(
                     "SELECT id, type, details_json, created_at FROM system_events ORDER BY id DESC LIMIT ?",
@@ -1328,8 +1332,7 @@ def create_app(
         res = apply_sqlite_to_pg(store)
         if not res.get("applied"):
             raise HTTPException(status_code=400, detail=res.get("error") or "PostgreSQL 이관 실패")
-        with store.connect() as conn:
-            Storage.audit(conn, "pg_migration_applied", {"counts": res.get("exported_counts", {})})
+        store.audit_event("pg_migration_applied", {"counts": res.get("exported_counts", {})})
         return res
 
     @app.get("/api/admin/pg-migration/export")
@@ -1337,8 +1340,7 @@ def create_app(
         from .pg_migration import export_sqlite_to_pg_sql
 
         sql_text, counts = export_sqlite_to_pg_sql(store)
-        with store.connect() as conn:
-            Storage.audit(conn, "pg_migration_exported", {"counts": counts})
+        store.audit_event("pg_migration_exported", {"counts": counts})
         return Response(
             content=sql_text.encode("utf-8"),
             media_type="application/sql; charset=utf-8",
@@ -1640,8 +1642,7 @@ def create_app(
         uid, _ = _current_user(request)
         if not app.state.identity.disable_mfa(uid, str(data.get("code") or "")):
             raise HTTPException(status_code=400, detail="유효하지 않은 TOTP 코드입니다.")
-        with store.connect() as conn:
-            Storage.audit(conn, "mfa_disabled", {"user_id": uid})
+        store.audit_event("mfa_disabled", {"user_id": uid})
         return {"mfa_enabled": False}
 
     @app.get("/api/member/credentials")
@@ -1889,8 +1890,7 @@ def create_app(
         )
         if not ok:
             raise HTTPException(status_code=400, detail=err_msg)
-        with store.connect() as conn:
-            Storage.audit(conn, "member_password_changed", {"user_id": uid})
+        store.audit_event("member_password_changed", {"user_id": uid})
         return {"changed": True}
 
     @app.get("/api/member/sessions")
@@ -1919,7 +1919,7 @@ def create_app(
             conn.execute("DELETE FROM private_accounts WHERE account_id=?", (member_acc,))
             conn.execute("DELETE FROM exchange_fills WHERE account_id=?", (member_acc,))
             conn.execute("DELETE FROM trade_positions WHERE account_id=?", (member_acc,))
-            Storage.audit(conn, "member_account_deleted", {"user_id": uid})
+        store.audit_event("member_account_deleted", {"user_id": uid})
         resp = JSONResponse({"deleted": True})
         resp.delete_cookie("bsb_session", path="/")
         return resp
