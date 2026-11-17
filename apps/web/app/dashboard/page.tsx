@@ -55,9 +55,19 @@ export default function MemberDashboardPage() {
   const [newPassword, setNewPassword] = useState('');
   const [disableMfaCode, setDisableMfaCode] = useState('');
   const [deletePassword, setDeletePassword] = useState('');
-  const [memberSummary, setMemberSummary] = useState<{ trade_count: number; realized_pnl_krw: string; win_rate: string | null } | null>(null);
+  const [memberSummary, setMemberSummary] = useState<{
+    trade_count: number;
+    wins?: number;
+    losses?: number;
+    realized_pnl_krw: string;
+    total_fees_krw?: string;
+    win_rate: string | null;
+    profit_factor?: string | null;
+    max_drawdown_pct?: string | null;
+  } | null>(null);
   const [byCoin, setByCoin] = useState<CoinStat[]>([]);
   const [dailyPnl, setDailyPnl] = useState<{ date: string; pnl_krw: string }[]>([]);
+  const [cumPnl, setCumPnl] = useState<{ timestamp: string; cumulative_pnl_krw: string }[]>([]);
   const [memberBalances, setMemberBalances] = useState<MemberBalance[]>([]);
   const [memberTrades, setMemberTrades] = useState<MemberTrade[]>([]);
   const [tradesPage, setTradesPage] = useState(1);
@@ -111,6 +121,7 @@ export default function MemberDashboardPage() {
     if (a?.summary) setMemberSummary(a.summary);
     setByCoin(a?.charts?.by_market ?? []);
     setDailyPnl(a?.charts?.daily_pnl ?? []);
+    setCumPnl(a?.charts?.cumulative_pnl ?? []);
     setMemberBalances(bal.items ?? []);
     setMemberTrades(tr.items ?? []);
     setTradesPage(1);
@@ -136,6 +147,7 @@ export default function MemberDashboardPage() {
     if (a?.summary) setMemberSummary(a.summary);
     setByCoin(a?.charts?.by_market ?? []);
     setDailyPnl(a?.charts?.daily_pnl ?? []);
+    setCumPnl(a?.charts?.cumulative_pnl ?? []);
     setMemberTrades(tr.items ?? []);
     setTradesPage(1);
     setTradesTotal(Number(tr.total ?? (tr.items ?? []).length));
@@ -469,6 +481,22 @@ export default function MemberDashboardPage() {
               <p className="mt-1 text-base font-semibold">{memberSummary?.win_rate ? `${memberSummary.win_rate}%` : '—'}</p>
             </div>
           </div>
+          {memberSummary && (
+            <div className="mt-2.5 grid grid-cols-2 gap-2 font-mono text-[11px] sm:grid-cols-4">
+              <div className="rounded-lg border border-[#1E2536] bg-[#0E1119] px-3 py-2 text-zinc-400">
+                승/패 <span className="ml-1 font-semibold text-zinc-200">{memberSummary.wins ?? 0}승 {memberSummary.losses ?? 0}패</span>
+              </div>
+              <div className="rounded-lg border border-[#1E2536] bg-[#0E1119] px-3 py-2 text-zinc-400">
+                수익팩터 <span className="ml-1 font-semibold text-zinc-200">{memberSummary.profit_factor ?? '—'}</span>
+              </div>
+              <div className="rounded-lg border border-[#1E2536] bg-[#0E1119] px-3 py-2 text-zinc-400">
+                총 수수료 <span className="ml-1 font-semibold text-zinc-200">{Math.round(Number(memberSummary.total_fees_krw ?? '0')).toLocaleString('ko-KR')}원</span>
+              </div>
+              <div className="rounded-lg border border-[#1E2536] bg-[#0E1119] px-3 py-2 text-zinc-400">
+                최대 낙폭 <span className="ml-1 font-semibold text-rose-300">{memberSummary.max_drawdown_pct ? `-${memberSummary.max_drawdown_pct}%` : '—'}</span>
+              </div>
+            </div>
+          )}
           {byCoin.length > 0 && (
             <div className="mt-3 flex flex-wrap gap-2 font-mono text-[11px]">
               {byCoin.slice(0, 8).map((c) => {
@@ -484,6 +512,42 @@ export default function MemberDashboardPage() {
               })}
             </div>
           )}
+          {cumPnl.length >= 2 && (() => {
+            const vals = cumPnl.map((p) => Number(p.cumulative_pnl_krw ?? 0));
+            const minV = Math.min(0, ...vals);
+            const maxV = Math.max(1, ...vals);
+            const span = Math.max(1, maxV - minV);
+            const w = 520;
+            const h = 80;
+            const pts = vals
+              .map((v, i) => {
+                const x = (i / (vals.length - 1)) * w;
+                const y = h - ((v - minV) / span) * (h - 12) - 6;
+                return `${x.toFixed(1)},${y.toFixed(1)}`;
+              })
+              .join(' ');
+            const zeroY = h - ((0 - minV) / span) * (h - 12) - 6;
+            const lastV = vals[vals.length - 1] ?? 0;
+            return (
+              <div className="mt-4 rounded-lg border border-[#1E2536] bg-[#0E1119] p-3 font-mono text-[10px]">
+                <div className="mb-2 flex items-center justify-between text-zinc-400">
+                  <span>누적 실현손익 곡선 ({cumPnl.length}건)</span>
+                  <span className={lastV >= 0 ? 'text-emerald-400' : 'text-rose-400'}>
+                    최종 {lastV >= 0 ? '+' : ''}{Math.round(lastV).toLocaleString('ko-KR')}원
+                  </span>
+                </div>
+                <svg viewBox={`0 0 ${w} ${h}`} className="h-20 w-full overflow-visible">
+                  <line x1="0" y1={zeroY} x2={w} y2={zeroY} stroke="#1E2536" strokeDasharray="3 3" strokeWidth="1" />
+                  <polyline
+                    fill="none"
+                    stroke={lastV >= 0 ? '#34d399' : '#fb7185'}
+                    strokeWidth="2"
+                    points={pts}
+                  />
+                </svg>
+              </div>
+            );
+          })()}
           {dailyPnl.length > 0 && (() => {
             const recent = dailyPnl.slice(-14);
             const maxAbs = Math.max(1, ...recent.map((d) => Math.abs(Number(d.pnl_krw ?? 0))));
