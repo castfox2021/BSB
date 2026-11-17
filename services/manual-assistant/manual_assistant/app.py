@@ -1273,6 +1273,18 @@ def create_app(
 
         return check_pg_connection_and_parity(store)
 
+    @app.post("/api/admin/pg-migration/apply")
+    async def apply_pg_migration(request: Request):
+        await body(request)
+        from .pg_migration import apply_sqlite_to_pg
+
+        res = apply_sqlite_to_pg(store)
+        if not res.get("applied"):
+            raise HTTPException(status_code=400, detail=res.get("error") or "PostgreSQL 이관 실패")
+        with store.connect() as conn:
+            Storage.audit(conn, "pg_migration_applied", {"counts": res.get("exported_counts", {})})
+        return res
+
     @app.get("/api/admin/pg-migration/export")
     def export_pg_migration_sql():
         from .pg_migration import export_sqlite_to_pg_sql

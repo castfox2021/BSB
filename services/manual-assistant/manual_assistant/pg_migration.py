@@ -322,6 +322,65 @@ def export_sqlite_to_pg_sql(store) -> tuple[str, dict[str, int]]:
                 ") ON CONFLICT (id) DO NOTHING;"
             )
 
+        lot_rows = conn.execute(
+            "SELECT id, position_id, buy_fill_id, sell_fill_id, market, allocated_quantity, allocated_cost, "
+            "allocated_proceeds, allocated_buy_fee, allocated_sell_fee, realized_pnl, realized_pnl_pct, "
+            "holding_seconds, opened_at, closed_at, execution_origin, strategy_name, strategy_version, exit_reason FROM trade_lot_allocations"
+        ).fetchall()
+        counts["trade_lot_allocations"] = len(lot_rows)
+        for r in lot_rows:
+            lines.append(
+                "INSERT INTO trade_lot_allocations (id, position_id, buy_fill_id, sell_fill_id, market, allocated_quantity, allocated_cost, "
+                "allocated_proceeds, allocated_buy_fee, allocated_sell_fee, realized_pnl, realized_pnl_pct, holding_seconds, opened_at, closed_at, execution_origin, strategy_name, strategy_version, exit_reason) VALUES ("
+                f"{_sql_text(r['id'])}, {_sql_text(r['position_id'])}, {_sql_text(r['buy_fill_id'])}, {_sql_text(r['sell_fill_id'])}, {_sql_text(r['market'])}, "
+                f"{_sql_num(r['allocated_quantity'])}, {_sql_num(r['allocated_cost'])}, {_sql_num(r['allocated_proceeds'])}, "
+                f"{_sql_num(r['allocated_buy_fee'])}, {_sql_num(r['allocated_sell_fee'])}, {_sql_num(r['realized_pnl'])}, "
+                f"{_sql_num(r['realized_pnl_pct'], True)}, {int(r['holding_seconds'] or 0)}, {_sql_text(r['opened_at'])}, "
+                f"{_sql_text(r['closed_at'])}, {_sql_text(r['execution_origin'])}, {_sql_text(r['strategy_name'])}, "
+                f"{_sql_text(r['strategy_version'])}, {_sql_text(r['exit_reason'])}"
+                ") ON CONFLICT (id) DO NOTHING;"
+            )
+
+        base_rows = conn.execute(
+            "SELECT account_id, market, initial_quantity, avg_cost_krw, note, updated_at FROM asset_cost_baselines"
+        ).fetchall()
+        counts["asset_cost_baselines"] = len(base_rows)
+        for r in base_rows:
+            lines.append(
+                "INSERT INTO asset_cost_baselines (account_id, market, initial_quantity, avg_cost_krw, note, updated_at) VALUES ("
+                f"{_sql_text(r['account_id'])}, {_sql_text(r['market'])}, {_sql_num(r['initial_quantity'])}, "
+                f"{_sql_num(r['avg_cost_krw'])}, {_sql_text(r['note'])}, {_sql_text(r['updated_at'])}"
+                ") ON CONFLICT (account_id, market) DO NOTHING;"
+            )
+
+        rev_rows = conn.execute(
+            "SELECT id, policy, symbol, status, quantity, entry_price, cost, net_pnl, exit_reason, opened_at, closed_at FROM reversion_positions"
+        ).fetchall()
+        counts["reversion_positions"] = len(rev_rows)
+        for r in rev_rows:
+            lines.append(
+                "INSERT INTO reversion_positions (id, policy, symbol, status, quantity, entry_price, cost, net_pnl, exit_reason, opened_at, closed_at) VALUES ("
+                f"{_sql_text(r['id'])}, {_sql_text(r['policy'])}, {_sql_text(r['symbol'])}, {_sql_text(r['status'])}, "
+                f"{_sql_num(r['quantity'])}, {_sql_num(r['entry_price'])}, {_sql_num(r['cost'])}, {_sql_num(r['net_pnl'])}, "
+                f"{_sql_text(r['exit_reason'])}, {_sql_text(r['opened_at'])}, {_sql_text(r['closed_at'])}"
+                ") ON CONFLICT (id) DO NOTHING;"
+            )
+
+        ev_rows = conn.execute(
+            "SELECT id, type, details_json, created_at FROM system_events ORDER BY id ASC"
+        ).fetchall()
+        counts["system_events"] = len(ev_rows)
+        for r in ev_rows:
+            lines.append(
+                "INSERT INTO system_events (id, type, details_json, created_at) VALUES ("
+                f"{int(r['id'])}, {_sql_text(r['type'])}, {_sql_jsonb(r['details_json'])}, {_sql_text(r['created_at'])}"
+                ") ON CONFLICT (id) DO NOTHING;"
+            )
+        if ev_rows:
+            lines.append(
+                "SELECT setval(pg_get_serial_sequence('system_events', 'id'), COALESCE((SELECT MAX(id) FROM system_events), 1), true);"
+            )
+
     lines.extend(["", "COMMIT;", ""])
     return "\n".join(lines), counts
 
@@ -385,3 +444,34 @@ def check_pg_connection_and_parity(store, dsn: str | None = None) -> dict:
     except Exception as exc:
         result["error"] = f"{type(exc).__name__}: {exc}"
     return result
+
+
+def apply_sqlite_to_pg(store, dsn: str | None = None) -> dict:
+    """Apply PG_DDL and idempotent SQLite row export directly to PostgreSQL."""
+    import os
+
+    target_dsn = (dsn or os.environ.get("DATABASE_URL") or "").strip()
+    if not target_dsn:
+        return {"applied": False, "error": "DATABASE_URL 환경변수가 설정되지 않았습니다."}
+    try:
+        import psycopg  # type: ignore
+    except ImportError:
+        return {
+            "applied": False,
+            "error": "psycopg 드라이버가 설치되지 않았습니다 (pip install psycopg[binary]).",
+        }
+
+    sql_text, counts = export_sqlite_to_pg_sql(store)
+    try:
+        with psycopg.connect(target_dsn, connect_timeout=10) as pg_conn:
+            with pg_conn.cursor() as cur:
+                cur.execute(sql_text)
+            pg_conn.commit()
+    except Exception as exc:
+        return {"applied": False, "error": f"{type(exc).__name__}: {exc}"}
+
+    return {
+        "applied": True,
+        "exported_counts": counts,
+        "status": check_pg_connection_and_parity(store, target_dsn),
+    }

@@ -22,6 +22,8 @@ export default function AdminSettingsPage() {
     parity_ok: boolean;
     error?: string | null;
   } | null>(null);
+  const [pgMsg, setPgMsg] = useState('');
+  const [pgBusy, setPgBusy] = useState(false);
   const [members, setMembers] = useState<{ id: string; email: string; role: string; mfa_enabled: boolean; exchanges: string[]; credentials_count: number; created_at: string }[]>([]);
 
   useEffect(() => {
@@ -81,6 +83,30 @@ export default function AdminSettingsPage() {
       setMfaMsg('운영자 2단계 인증(TOTP)이 비활성화되었습니다.');
     } else {
       setMfaMsg('유효하지 않은 TOTP 코드입니다.');
+    }
+  }
+
+  async function applyPgMigration() {
+    if (!window.confirm('현재 SQLite 데이터를 PostgreSQL(DATABASE_URL)에 멱등 이관(ON CONFLICT DO NOTHING)할까요?')) {
+      return;
+    }
+    setPgBusy(true);
+    setPgMsg('');
+    try {
+      const res = await fetch('/api/manual/admin/pg-migration/apply', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: '{}',
+      });
+      const d = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setPgMsg(`이관 실패: ${d.detail || d.error || res.status}`);
+        return;
+      }
+      if (d.status) setPgStatus(d.status);
+      setPgMsg(`PostgreSQL 이관 완료 (정합성: ${d.status?.parity_ok ? '일치' : '확인 필요'})`);
+    } finally {
+      setPgBusy(false);
     }
   }
 
@@ -155,13 +181,24 @@ export default function AdminSettingsPage() {
                   </span>
                 ))}
               </div>
-              <a
-                href="/api/manual/admin/pg-migration/export"
-                className="rounded-lg border border-emerald-500/40 bg-emerald-500/15 px-3 py-1.5 font-mono text-[11px] font-semibold text-emerald-300"
-              >
-                이관 SQL 다운로드 (.sql)
-              </a>
+              <div className="flex flex-wrap gap-2">
+                <a
+                  href="/api/manual/admin/pg-migration/export"
+                  className="rounded-lg border border-emerald-500/40 bg-emerald-500/15 px-3 py-1.5 font-mono text-[11px] font-semibold text-emerald-300"
+                >
+                  이관 SQL 다운로드 (.sql)
+                </a>
+                <button
+                  type="button"
+                  disabled={pgBusy}
+                  onClick={applyPgMigration}
+                  className="rounded-lg bg-zinc-100 px-3 py-1.5 font-mono text-[11px] font-semibold text-zinc-950 disabled:opacity-50"
+                >
+                  {pgBusy ? '이관 실행 중...' : 'PostgreSQL 직접 이관 실행'}
+                </button>
+              </div>
             </div>
+            {pgMsg && <p className="mt-2 font-mono text-[11px] text-emerald-400">{pgMsg}</p>}
             {pgStatus && (
               <p className="mt-2 font-mono text-[11px] text-zinc-400">
                 PG 연결:{' '}

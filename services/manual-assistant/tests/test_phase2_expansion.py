@@ -146,7 +146,7 @@ def test_strategy_proposal_preview_never_auto_applies(tmp_path):
         assert body["diffs"][0]["proposed"] == "0.025"
 
 
-def test_admin_audit_logs_rbac_and_pg_migration_preview(tmp_path):
+def test_admin_audit_logs_rbac_and_pg_migration_preview(tmp_path, monkeypatch):
     app = create_app(tmp_path / "p3.sqlite3", enforce_admin_auth=True)
     with TestClient(app, base_url=ORIGIN) as client:
         client.post(
@@ -164,6 +164,7 @@ def test_admin_audit_logs_rbac_and_pg_migration_preview(tmp_path):
         assert client.get("/api/admin/pg-migration/preview", headers={**HEADERS, "x-bsb-admin-session": m_tok}).status_code == 401
         assert client.get("/api/admin/pg-migration/status", headers={**HEADERS, "x-bsb-admin-session": m_tok}).status_code == 401
         assert client.get("/api/admin/pg-migration/export", headers={**HEADERS, "x-bsb-admin-session": m_tok}).status_code == 401
+        assert client.post("/api/admin/pg-migration/apply", headers={**HEADERS, "x-bsb-admin-session": m_tok}, json={}).status_code == 401
 
         # Admin can read audit logs, PG DDL & export SQL
         a_tok = client.post(
@@ -188,6 +189,58 @@ def test_admin_audit_logs_rbac_and_pg_migration_preview(tmp_path):
         assert "mem@example.com" in pg_exp.text
         assert "ON CONFLICT (id) DO NOTHING;" in pg_exp.text
         assert "COMMIT;" in pg_exp.text
+
+        # PG apply without DATABASE_URL returns 400
+        monkeypatch.delenv("DATABASE_URL", raising=False)
+        assert client.post("/api/admin/pg-migration/apply", headers=a_h, json={}).status_code == 400
+
+        # PG apply with mocked psycopg succeeds
+        import sys
+        import types
+
+        executed_sql: list[str] = []
+
+        class FakeCursor:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                return False
+
+            def execute(self, sql):
+                executed_sql.append(sql)
+                self._last = sql
+
+            def fetchone(self):
+                if "SELECT version()" in self._last:
+                    return ("PostgreSQL 16.16",)
+                return (0,)
+
+        class FakePgConn:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                return False
+
+            def cursor(self):
+                return FakeCursor()
+
+            def commit(self):
+                pass
+
+            def rollback(self):
+                pass
+
+        fake_psycopg = types.ModuleType("psycopg")
+        fake_psycopg.connect = lambda *args, **kwargs: FakePgConn()
+        monkeypatch.setitem(sys.modules, "psycopg", fake_psycopg)
+        monkeypatch.setenv("DATABASE_URL", "postgresql://bsb_user:test@127.0.0.1:5432/bsb")
+
+        app_res = client.post("/api/admin/pg-migration/apply", headers=a_h, json={})
+        assert app_res.status_code == 200
+        assert app_res.json()["applied"] is True
+        assert any("INSERT INTO users" in s for s in executed_sql)
 
 
 def test_member_upbit_sync_orders_and_trades_isolation(tmp_path, monkeypatch):

@@ -57,6 +57,7 @@ const routes = new Set([
   'admin/pg-migration/preview',
   'admin/pg-migration/status',
   'admin/pg-migration/export',
+  'admin/pg-migration/apply',
   'admin/strategy-reports',
   'admin/strategy-reports/preview',
   'admin/strategy-comparisons',
