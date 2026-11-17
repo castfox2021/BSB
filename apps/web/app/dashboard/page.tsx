@@ -857,6 +857,65 @@ export default function MemberDashboardPage() {
               {orderBusy ? '전송 중...' : orderSide === 'BUY' ? '매수 실행' : '매도 실행'}
             </button>
           </form>
+          {(() => {
+            const normMkt = normalizeMarketParam(orderMarket);
+            const coinSym = normMkt === 'ALL' ? '' : normMkt.replace(/^KRW-/, '');
+            const liveP = normMkt !== 'ALL' ? ((orderExchange === 'UPBIT' ? upbitPrices[normMkt] : bithumbPrices[normMkt]) ?? 0) : 0;
+            const krwKey = orderExchange === 'UPBIT' ? 'UPBIT:KRW' : 'KRW';
+            const coinKey = orderExchange === 'UPBIT' ? `UPBIT:${coinSym}` : coinSym;
+            const availKrw = Number(memberBalances.find((b) => b.currency === krwKey)?.balance ?? 0);
+            const availCoin = coinSym ? Number(memberBalances.find((b) => b.currency === coinKey)?.balance ?? 0) : 0;
+            const estTotal = orderType === 'limit' ? Number(orderPrice || 0) * Number(orderVolume || 0) : orderSide === 'BUY' ? Number(orderPrice || 0) : liveP * Number(orderVolume || 0);
+            return (
+              <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-[#1E2536] pt-3 font-mono text-[11px]">
+                <div className="flex flex-wrap items-center gap-1.5">
+                  {liveP > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => setOrderPrice(String(liveP))}
+                      className="rounded border border-[#2A344B] bg-[#181E2B] px-2 py-1 text-zinc-200 hover:border-zinc-400"
+                    >
+                      현재가 {liveP.toLocaleString('ko-KR')}원
+                    </button>
+                  )}
+                  {[0.25, 0.5, 1].map((ratio) => (
+                    <button
+                      key={ratio}
+                      type="button"
+                      onClick={() => {
+                        if (orderSide === 'SELL') {
+                          if (availCoin <= 0) return;
+                          const q = (availCoin * ratio).toFixed(8).replace(/\.?0+$/, '');
+                          setOrderVolume(q);
+                        } else if (orderType === 'market') {
+                          if (availKrw <= 0) return;
+                          setOrderPrice(String(Math.floor(availKrw * ratio * 0.998)));
+                        } else {
+                          const p = Number(orderPrice || liveP || 0);
+                          if (availKrw <= 0 || p <= 0) return;
+                          if (!orderPrice && liveP > 0) setOrderPrice(String(liveP));
+                          setOrderVolume(((availKrw * ratio * 0.998) / p).toFixed(6).replace(/\.?0+$/, ''));
+                        }
+                      }}
+                      className="rounded border border-[#1E2536] bg-[#0E1119] px-2 py-1 text-zinc-300 hover:border-zinc-500"
+                    >
+                      {Math.round(ratio * 100)}%
+                    </button>
+                  ))}
+                  <span className="ml-1 text-zinc-500">
+                    {orderSide === 'BUY'
+                      ? `가용 ${Math.floor(availKrw).toLocaleString('ko-KR')}원`
+                      : `보유 ${availCoin.toLocaleString('ko-KR', { maximumFractionDigits: 6 })} ${coinSym}`}
+                  </span>
+                </div>
+                {estTotal > 0 && (
+                  <span className="text-zinc-300">
+                    예상 금액 <span className="font-semibold text-zinc-100">{Math.round(estTotal).toLocaleString('ko-KR')}원</span>
+                  </span>
+                )}
+              </div>
+            );
+          })()}
         </section>
 
         {/* 내 미체결 주문 & 급락 반등 관찰 */}
