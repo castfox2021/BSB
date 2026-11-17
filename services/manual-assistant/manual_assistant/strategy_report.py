@@ -320,13 +320,14 @@ class StrategyReportBuilder:
                         if r.get("closed_at")
                         else int(datetime.now(UTC).timestamp())
                     )
-                    c_rows = [
-                        dict(c)
-                        for c in conn.execute(
-                            "SELECT * FROM market_candles WHERE symbol=? AND timeframe=60 AND start>=? AND start<=? ORDER BY start ASC",
-                            (r["symbol"], start_ts, end_ts),
-                        ).fetchall()
-                    ]
+                    with getattr(self.store, "market_store", self.store).connect() as mconn:
+                        c_rows = [
+                            dict(c)
+                            for c in mconn.execute(
+                                "SELECT * FROM market_candles WHERE symbol=? AND timeframe=60 AND start>=? AND start<=? ORDER BY start ASC",
+                                (r["symbol"], start_ts, end_ts),
+                            ).fetchall()
+                        ]
                     flags: list[str] = []
                     lowest_p: Decimal | None = None
                     if c_rows:

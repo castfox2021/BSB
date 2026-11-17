@@ -640,11 +640,12 @@ class Engine:
                             ),
                         )
                 conn.execute(
-                    "DELETE FROM market_events WHERE rowid NOT IN (SELECT rowid FROM market_events ORDER BY rowid DESC LIMIT 50000)"
-                )
-                conn.execute(
                     "DELETE FROM performance_samples WHERE at<?", (minute - 30 * 86400,)
                 )
+        with getattr(self.store, "market_store", self.store).connect() as mconn:
+            mconn.execute(
+                "DELETE FROM market_events WHERE rowid NOT IN (SELECT rowid FROM market_events ORDER BY rowid DESC LIMIT 50000)"
+            )
         self.market.metrics["signal_compute_ms"] = (
             time.perf_counter() - started
         ) * 1000

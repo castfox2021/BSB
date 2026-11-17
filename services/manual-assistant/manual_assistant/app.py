@@ -148,6 +148,9 @@ def create_app(
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         store.initialize(Settings().model_dump())
+        market_store = Storage(path.parent / "market.sqlite3")
+        market_store.initialize_market()
+        store.market_store = market_store
         with store.connect() as conn:
             conn.execute(
                 "CREATE INDEX IF NOT EXISTS paper_board_history ON paper_trades(version_id,created_at DESC,id DESC)"
@@ -161,6 +164,7 @@ def create_app(
             market_enabled
             if market_enabled is not None
             else os.getenv("BSB_MARKET_ENABLED", "1") == "1",
+            market_store=market_store,
         )
         private = PrivateSync(
             store,

@@ -4,8 +4,10 @@ import AdminShell from './admin-shell';
 import ReversionPanel, { Reversion } from '../reversion-panel';
 import QuietBoard from '../quiet-board';
 import QuietDetail from '../quiet-details';
-import { api, kst } from '../trading-types';
-import { Board, Holding, PaperTrade, pnlColor, signedMoney } from '../quiet-types';
+import { api, kst, openBithumb } from '../trading-types';
+import { Board, Holding, PaperTrade, pnlColor, priceText, quantityText, signedMoney } from '../quiet-types';
+
+type RealAccount = { currency: string; balance: string; locked: string; average_price?: string };
 
 export default function AdminDashboardPage() {
   const [board, setBoard] = useState<Board | null>(null);
@@ -14,14 +16,19 @@ export default function AdminDashboardPage() {
   const [sellPage, setSellPage] = useState(1);
   const [trade, setTrade] = useState<PaperTrade | null>(null);
   const [symbol, setSymbol] = useState('KRW-BTC');
+  const [accounts, setAccounts] = useState<RealAccount[]>([]);
 
   useEffect(() => {
     let active = true;
     const load = async () => {
       try {
-        const res = await api<Board>(`board?buy_page=${buyPage}&sell_page=${sellPage}`);
+        const [res, acc] = await Promise.all([
+          api<Board>(`board?buy_page=${buyPage}&sell_page=${sellPage}`),
+          api<{ items?: RealAccount[] }>('private/accounts').catch(() => ({ items: [] })),
+        ]);
         if (active) {
           setBoard(res);
+          setAccounts(acc.items ?? []);
           setError('');
         }
       } catch {
@@ -59,6 +66,47 @@ export default function AdminDashboardPage() {
         </div>
 
         {error && <p className="rounded-lg border border-rose-900/50 bg-[#121620] px-4 py-3 text-sm text-rose-300">{error}</p>}
+
+        {/* 실전 계좌 보유 현황 (빗썸 매도 바로가기) */}
+        {accounts.length > 0 && (
+          <section className="rounded-xl border border-[#1E2536] bg-[#121620] p-5">
+            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[#1E2536]/80 pb-3">
+              <h2 className="text-sm font-semibold text-zinc-100">실전 계좌 보유 현황 (빗썸 수동 매도)</h2>
+              <span className="font-mono text-xs text-zinc-400">
+                주문 가능 원화:{' '}
+                <strong className="text-zinc-100">
+                  {Number(accounts.find((a) => a.currency === 'KRW')?.balance ?? '0').toLocaleString('ko-KR', { maximumFractionDigits: 0 })}원
+                </strong>
+              </span>
+            </div>
+            <div className="mt-3 grid gap-2.5 sm:grid-cols-2 lg:grid-cols-3">
+              {accounts
+                .filter((a) => a.currency !== 'KRW' && Number(a.balance) + Number(a.locked) > 0)
+                .map((a) => {
+                  const sym = `KRW-${a.currency}`;
+                  const qty = Number(a.balance) + Number(a.locked);
+                  const avg = Number(a.average_price || 0);
+                  return (
+                    <div key={a.currency} className="flex items-center justify-between rounded-lg border border-[#1E2536] bg-[#0E1119] px-3.5 py-2.5 text-xs">
+                      <div>
+                        <strong className="font-mono text-sm text-zinc-100">{a.currency}</strong>
+                        <p className="mt-0.5 font-mono text-[11px] text-zinc-400">
+                          수량 {quantityText(qty)} · 평단 {avg > 0 ? `${priceText(String(avg))}원` : '—'}
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => openBithumb(sym)}
+                        className="rounded-md border border-[#2A344B] bg-[#181E2B] px-2.5 py-1 text-[11px] font-medium text-zinc-200 hover:border-zinc-400"
+                      >
+                        빗썸 매도 ↗
+                      </button>
+                    </div>
+                  );
+                })}
+            </div>
+          </section>
+        )}
 
         {/* 핵심 급락 반등 패널 */}
         <ReversionPanel data={(board as (Board & { reversion?: Reversion | null }) | null)?.reversion} />

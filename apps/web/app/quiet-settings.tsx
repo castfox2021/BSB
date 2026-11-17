@@ -36,6 +36,7 @@ export default function QuietSettings({ board, onSaved }: { board: Board | null;
     cooldown_seconds: number;
     exclude_warning_coins: boolean;
     excluded_symbols: string;
+    buy_entry_mode: 'immediate' | 'candle_bounce';
   } | null>(null);
   const [revMessage, setRevMessage] = useState('');
   const [revIsError, setRevIsError] = useState(false);
@@ -80,6 +81,7 @@ export default function QuietSettings({ board, onSaved }: { board: Board | null;
       cooldown_seconds?: number;
       exclude_warning_coins?: boolean;
       excluded_symbols?: string[];
+      buy_entry_mode?: 'immediate' | 'candle_bounce';
     }>('reversion/config')
       .then((c) =>
         setRevConfig({
@@ -90,6 +92,7 @@ export default function QuietSettings({ board, onSaved }: { board: Board | null;
           cooldown_seconds: Number(c.cooldown_seconds ?? 1800),
           exclude_warning_coins: Boolean(c.exclude_warning_coins ?? false),
           excluded_symbols: (c.excluded_symbols ?? []).join(', '),
+          buy_entry_mode: c.buy_entry_mode === 'candle_bounce' ? 'candle_bounce' : 'immediate',
         })
       )
       .catch(() => setRevConfig(null));
@@ -226,6 +229,7 @@ export default function QuietSettings({ board, onSaved }: { board: Board | null;
         cooldown_seconds: number;
         exclude_warning_coins: boolean;
         excluded_symbols: string[];
+        buy_entry_mode: 'immediate' | 'candle_bounce';
       }>('reversion/config', 'PATCH', {
         drop_1m: revConfig.drop_1m.trim(),
         drop_1m_confirm_3m: revConfig.drop_1m_confirm_3m.trim(),
@@ -234,6 +238,7 @@ export default function QuietSettings({ board, onSaved }: { board: Board | null;
         cooldown_seconds: Number(revConfig.cooldown_seconds),
         exclude_warning_coins: revConfig.exclude_warning_coins,
         excluded_symbols: revConfig.excluded_symbols,
+        buy_entry_mode: revConfig.buy_entry_mode,
       });
       setRevConfig({
         drop_1m: String(updated.drop_1m),
@@ -243,6 +248,7 @@ export default function QuietSettings({ board, onSaved }: { board: Board | null;
         cooldown_seconds: Number(updated.cooldown_seconds),
         exclude_warning_coins: Boolean(updated.exclude_warning_coins),
         excluded_symbols: (updated.excluded_symbols ?? []).join(', '),
+        buy_entry_mode: updated.buy_entry_mode === 'candle_bounce' ? 'candle_bounce' : 'immediate',
       });
       setRevMessage('급락 반등 포착 기준을 저장했습니다.');
       onSaved();
@@ -381,6 +387,19 @@ export default function QuietSettings({ board, onSaved }: { board: Board | null;
           </div>
 
           <div className="mt-4 space-y-3">
+            <label className="block text-xs font-medium text-zinc-300">
+              실전 자동매수 진입 타이밍
+              <select
+                className={`${input} mt-1.5 block w-full font-sans`}
+                value={revConfig.buy_entry_mode}
+                onChange={(e) =>
+                  setRevConfig({ ...revConfig, buy_entry_mode: e.target.value as 'immediate' | 'candle_bounce' })
+                }
+              >
+                <option value="immediate">포착 즉시 매수1호가 지정가 (빠른 진입)</option>
+                <option value="candle_bounce">1분봉 양봉 반전 확인 후 매수1호가 지정가 (떨어지는 칼날 완화)</option>
+              </select>
+            </label>
             <label className="block text-xs font-medium text-zinc-300">
               오늘 상폐 등 수동 제외 종목 (쉼표 구분, 예: TEMCO, KRW-OSMO)
               <input

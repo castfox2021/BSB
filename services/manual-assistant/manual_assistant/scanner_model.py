@@ -105,7 +105,7 @@ class ScannerModel:
 
     def train_local(self):
         # Same timestamp for every market; purge labels crossing the temporal split.
-        with self.store.connect() as conn:
+        with getattr(self.store, "market_store", self.store).connect() as conn:
             rows = conn.execute("""SELECT symbol,start,open,high,low,close,volume,turnover FROM market_candles
                 WHERE timeframe=60 AND closed=1 AND complete=1 ORDER BY start DESC,symbol LIMIT 16000""").fetchall()
         grouped = {}

@@ -60,6 +60,7 @@ class ReversionLab:
             )
             cfg.setdefault("exclude_warning_coins", False)
             cfg.setdefault("excluded_symbols", [])
+            cfg.setdefault("buy_entry_mode", "immediate")
             return cfg
 
     def update_config(self, patch: dict):
@@ -88,6 +89,10 @@ class ReversionLab:
             if sym not in normalized:
                 normalized.append(sym)
         merged["excluded_symbols"] = normalized
+        mode = str(merged.get("buy_entry_mode") or "immediate")
+        if mode not in ("immediate", "candle_bounce"):
+            raise ValueError("buy_entry_mode는 immediate 또는 candle_bounce여야 합니다.")
+        merged["buy_entry_mode"] = mode
         with self.store.connect() as conn:
             conn.execute(
                 "INSERT OR REPLACE INTO strategy_state VALUES('reversion_config',?)",
@@ -829,14 +834,19 @@ class ReversionLab:
                     continue
                 now_mono = time.monotonic()
                 if symbol not in self.watch:
+                    buy_mode = config.get("buy_entry_mode", "immediate")
                     self.watch[symbol] = {
                         "low": D(row["price"]),
                         "drops": [decimal_text(x) for x in changes],
                         "until": now_mono + 900,
                         "base_bars": 0,
+                        "bounce_bought": buy_mode == "immediate",
                     }
-                    self.pending_auto_buys.append({"symbol": symbol, "version_id": "reversion_watch"})
-                    logger.warning("reversion_watch added: %s", symbol)
+                    if buy_mode == "immediate":
+                        self.pending_auto_buys.append({"symbol": symbol, "version_id": "reversion_watch"})
+                        logger.warning("reversion_watch added (immediate): %s", symbol)
+                    else:
+                        logger.warning("reversion_watch added (waiting candle_bounce): %s", symbol)
                 else:
                     existing = self.watch[symbol]
                     cur_p = D(row["price"])
@@ -862,6 +872,12 @@ class ReversionLab:
             bars = self.market.book.load_contiguous(symbol, limit=100)
             if len(bars) < 16:
                 continue
+            if config.get("buy_entry_mode") == "candle_bounce" and not watched.get("bounce_bought"):
+                last_bar = bars[-1]
+                if D(last_bar["close"]) > D(last_bar["open"]):
+                    watched["bounce_bought"] = True
+                    self.pending_auto_buys.append({"symbol": symbol, "version_id": "reversion_watch"})
+                    logger.warning("reversion_watch bounce confirmed (candle_bounce): %s", symbol)
 
             # Drop-Base-Rebound pattern check
             recent_lookback = min(len(bars), 16)

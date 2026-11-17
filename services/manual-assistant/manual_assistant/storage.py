@@ -8,6 +8,7 @@ from pathlib import Path
 class Storage:
     def __init__(self, path: Path):
         self.path = path
+        self.market_store = self
 
     @contextmanager
     def connect(self):
@@ -81,3 +82,32 @@ class Storage:
                 row["key"]: json.loads(row["value"])
                 for row in conn.execute("SELECT key,value FROM settings")
             }
+
+    def initialize_market(self):
+        self.path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+        with self.connect() as conn:
+            conn.execute("PRAGMA journal_mode=WAL")
+            conn.execute("PRAGMA synchronous=NORMAL")
+            conn.executescript("""
+              CREATE TABLE IF NOT EXISTS market_candles(
+                symbol TEXT, timeframe INTEGER, start INTEGER, end INTEGER,
+                open TEXT, high TEXT, low TEXT, close TEXT, volume TEXT, turnover TEXT,
+                trade_count INTEGER, closed INTEGER, complete INTEGER, origin TEXT,
+                updated_at TEXT, quality_notes TEXT,
+                PRIMARY KEY(symbol, timeframe, start)
+              );
+              CREATE INDEX IF NOT EXISTS market_candle_pending ON market_candles(end) WHERE timeframe=60 AND closed=0;
+              CREATE INDEX IF NOT EXISTS scanner_training_candles ON market_candles(start DESC,symbol) WHERE timeframe=60 AND closed=1 AND complete=1;
+              CREATE TABLE IF NOT EXISTS market_events(
+                id TEXT PRIMARY KEY, symbol TEXT, type TEXT, exchange_at TEXT, received_at TEXT, payload TEXT
+              );
+              CREATE INDEX IF NOT EXISTS events_time ON market_events(received_at);
+              CREATE INDEX IF NOT EXISTS replay_events_symbol ON market_events(symbol,exchange_at,received_at);
+              CREATE TABLE IF NOT EXISTS market_issues(
+                id INTEGER PRIMARY KEY, symbol TEXT, kind TEXT, details TEXT, created_at TEXT
+              );
+              CREATE TABLE IF NOT EXISTS replay_candles(
+                id INTEGER PRIMARY KEY, symbol TEXT, start INTEGER, known_at TEXT, payload TEXT,
+                UNIQUE(symbol,start,known_at)
+              );
+            """)

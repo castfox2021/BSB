@@ -30,9 +30,10 @@ WS = "wss://ws-api.bithumb.com/websocket/v1"
 
 
 class Market:
-    def __init__(self, store, enabled=True):
+    def __init__(self, store, enabled=True, market_store=None):
         self.store, self.enabled = store, enabled
-        self.book = Candles(store)
+        self.market_store = market_store or store
+        self.book = Candles(self.market_store)
         self.rolling = RollingScanner()
         self.model = ScannerModel(store)
         self.latest = {}
@@ -468,13 +469,15 @@ class Market:
     def detail_analysis(self, symbol, book, is_candidate):
         from .review_events import append_event, archive_candles
 
+        with self.market_store.connect() as mconn:
+            recent_candles = mconn.execute(
+                "SELECT * FROM market_candles WHERE symbol=? AND timeframe=60 ORDER BY start DESC LIMIT 2",
+                (symbol,),
+            ).fetchall()
         with self.store.connect() as conn:
             archive_candles(
                 conn,
-                conn.execute(
-                    "SELECT * FROM market_candles WHERE symbol=? AND timeframe=60 ORDER BY start DESC LIMIT 2",
-                    (symbol,),
-                ).fetchall(),
+                recent_candles,
                 source="WS_DETAIL_SNAPSHOT",
             )
             append_event(
