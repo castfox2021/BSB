@@ -116,3 +116,34 @@ def test_missing_cost_basis_baseline_and_csv_xlsx_import_conflict(tmp_path):
             if fmt == "xlsx":
                 with zipfile.ZipFile(io.BytesIO(exp.content)) as zf:
                     assert "xl/worksheets/sheet1.xml" in zf.namelist()
+
+
+def test_query_analytics_exchange_filter(tmp_path):
+    app = create_app(tmp_path / "ana_ex.sqlite3")
+    with TestClient(app, base_url=ORIGIN):
+        acc = "member:u-ex-1"
+        with app.state.storage.identity_connect() as conn:
+            conn.executemany(
+                "INSERT INTO exchange_fills VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                [
+                    ("fb1", "bithumb", acc, "ex-b1", "ob1", None, "KRW-BTC", "BUY", "100000000", "0.01", "1000000", "400", "KRW", "400", "api", "MANUAL", "BITHUMB_API", None, "2026-11-17T01:00:00+00:00", "{}"),
+                    ("fb2", "bithumb", acc, "ex-b2", "ob2", None, "KRW-BTC", "SELL", "110000000", "0.01", "1100000", "440", "KRW", "440", "api", "MANUAL", "BITHUMB_API", None, "2026-11-17T02:00:00+00:00", "{}"),
+                    ("fu1", "upbit", acc, "ex-u1", "ou1", None, "KRW-ETH", "BUY", "4000000", "1", "4000000", "2000", "KRW", "2000", "api", "MANUAL", "UPBIT_API", None, "2026-11-17T03:00:00+00:00", "{}"),
+                    ("fu2", "upbit", acc, "ex-u2", "ou2", None, "KRW-ETH", "SELL", "3900000", "1", "3900000", "1950", "KRW", "1950", "api", "MANUAL", "UPBIT_API", None, "2026-11-17T04:00:00+00:00", "{}"),
+                ],
+            )
+        app.state.analytics_ledger.recalculate(acc)
+
+        all_res = app.state.analytics_ledger.query_analytics({"mode": "LIVE", "period": "all", "account_id": acc, "exchange": "ALL"})
+        bt_res = app.state.analytics_ledger.query_analytics({"mode": "LIVE", "period": "all", "account_id": acc, "exchange": "BITHUMB"})
+        up_res = app.state.analytics_ledger.query_analytics({"mode": "LIVE", "period": "all", "account_id": acc, "exchange": "UPBIT"})
+
+        assert all_res["summary"]["trade_count"] == 2
+        assert bt_res["summary"]["trade_count"] == 1
+        assert bt_res["trades"][0]["market"] == "KRW-BTC"
+        assert bt_res["trades"][0]["exchange"] == "bithumb"
+        assert D(bt_res["summary"]["realized_pnl_krw"]) > 0
+        assert up_res["summary"]["trade_count"] == 1
+        assert up_res["trades"][0]["market"] == "KRW-ETH"
+        assert up_res["trades"][0]["exchange"] == "upbit"
+        assert D(up_res["summary"]["realized_pnl_krw"]) < 0

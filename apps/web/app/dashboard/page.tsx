@@ -78,13 +78,13 @@ export default function MemberDashboardPage() {
     setWatchingItems(strat?.watching_items ?? []);
   }
 
-  async function load() {
+  async function load(ex: 'ALL' | 'BITHUMB' | 'UPBIT' = exFilter) {
     const [s, c, a, bal, tr, oo, sess] = await Promise.all([
       fetch('/api/manual/auth/session').then((r) => r.json()).catch(() => null),
       fetch('/api/manual/member/credentials').then((r) => (r.ok ? r.json() : { items: [] })).catch(() => ({ items: [] })),
-      fetch('/api/manual/member/analytics').then((r) => (r.ok ? r.json() : null)).catch(() => null),
+      fetch(`/api/manual/member/analytics?exchange=${ex}`).then((r) => (r.ok ? r.json() : null)).catch(() => null),
       fetch('/api/manual/member/accounts').then((r) => (r.ok ? r.json() : { items: [] })).catch(() => ({ items: [] })),
-      fetch('/api/manual/member/trades?page=1&page_size=20').then((r) => (r.ok ? r.json() : { items: [] })).catch(() => ({ items: [] })),
+      fetch(`/api/manual/member/trades?page=1&page_size=20&exchange=${ex}`).then((r) => (r.ok ? r.json() : { items: [] })).catch(() => ({ items: [] })),
       fetch('/api/manual/member/open-orders').then((r) => (r.ok ? r.json() : { items: [] })).catch(() => ({ items: [] })),
       fetch('/api/manual/member/sessions').then((r) => (r.ok ? r.json() : { items: [] })).catch(() => ({ items: [] })),
     ]);
@@ -97,6 +97,17 @@ export default function MemberDashboardPage() {
     setOpenOrders(oo.items ?? []);
     setActiveSessions(sess.items ?? []);
     await refreshPrices();
+  }
+
+  async function changeExFilter(ex: 'ALL' | 'BITHUMB' | 'UPBIT') {
+    setExFilter(ex);
+    const [a, tr] = await Promise.all([
+      fetch(`/api/manual/member/analytics?exchange=${ex}`).then((r) => (r.ok ? r.json() : null)).catch(() => null),
+      fetch(`/api/manual/member/trades?page=1&page_size=20&exchange=${ex}`).then((r) => (r.ok ? r.json() : { items: [] })).catch(() => ({ items: [] })),
+    ]);
+    if (a?.summary) setMemberSummary(a.summary);
+    setByCoin(a?.charts?.by_market ?? []);
+    setMemberTrades(tr.items ?? []);
   }
 
   async function syncMemberAccount() {
@@ -321,7 +332,7 @@ export default function MemberDashboardPage() {
                 <button
                   key={ex}
                   type="button"
-                  onClick={() => setExFilter(ex)}
+                  onClick={() => changeExFilter(ex)}
                   className={`rounded-lg px-2.5 py-1.5 font-mono text-[11px] font-semibold ${
                     exFilter === ex ? 'bg-zinc-100 text-zinc-950' : 'border border-[#1E2536] bg-[#0E1119] text-zinc-400'
                   }`}
@@ -434,7 +445,7 @@ export default function MemberDashboardPage() {
               <h2 className="text-base font-semibold">내 미체결 주문 현황 (Bithumb · Upbit)</h2>
               <p className="mt-1 text-zinc-400">연결된 거래소 계정의 대기(wait) 지정가 주문만 읽기 전용으로 조회합니다.</p>
             </div>
-            <button type="button" onClick={load} className="rounded-lg border border-[#2A344B] bg-[#181E2B] px-3 py-1.5 text-zinc-200">
+            <button type="button" onClick={() => load()} className="rounded-lg border border-[#2A344B] bg-[#181E2B] px-3 py-1.5 text-zinc-200">
               새로고침
             </button>
           </div>
@@ -502,13 +513,13 @@ export default function MemberDashboardPage() {
             <div className="flex items-center gap-2 font-mono text-[11px]">
               <span className="text-zinc-400">최근 {memberTrades.length}건</span>
               <a
-                href="/api/manual/member/export?format=csv"
+                href={`/api/manual/member/export?format=csv&exchange=${exFilter}`}
                 className="rounded border border-[#2A344B] bg-[#181E2B] px-2.5 py-1 text-zinc-200 hover:border-zinc-400"
               >
                 CSV 내보내기
               </a>
               <a
-                href="/api/manual/member/export?format=json"
+                href={`/api/manual/member/export?format=json&exchange=${exFilter}`}
                 className="rounded border border-[#2A344B] bg-[#181E2B] px-2.5 py-1 text-zinc-200 hover:border-zinc-400"
               >
                 JSON

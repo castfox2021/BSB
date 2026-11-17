@@ -443,6 +443,7 @@ class AnalyticsLedger:
         outcome_f = str(filters.get("outcome") or "ALL").upper()
         mode_f = str(filters.get("mode") or "LIVE").upper()  # LIVE | PAPER
         account_f = filters.get("account_id")
+        exchange_f = str(filters.get("exchange") or "ALL").strip().upper()
 
         with self.store.identity_connect() as conn:
             if mode_f == "PAPER":
@@ -510,14 +511,16 @@ class AnalyticsLedger:
                 lots = []
                 clauses: list[str] = []
                 params: list = []
+                lot_joins: list[str] = ["LEFT JOIN exchange_fills ef ON l.sell_fill_id=ef.id"]
+                col_prefix = "l."
                 if account_f:
-                    lot_base = "SELECT l.* FROM trade_lot_allocations l JOIN trade_positions p ON l.position_id=p.id"
+                    lot_joins.append("JOIN trade_positions p ON l.position_id=p.id")
                     clauses.append("p.account_id=?")
                     params.append(account_f)
-                    col_prefix = "l."
-                else:
-                    lot_base = "SELECT * FROM trade_lot_allocations"
-                    col_prefix = ""
+                if exchange_f not in ("ALL", ""):
+                    clauses.append("LOWER(ef.exchange)=?")
+                    params.append(exchange_f.lower())
+                lot_base = f"SELECT l.*, ef.exchange AS exchange FROM trade_lot_allocations l {' '.join(lot_joins)}"
                 if start_utc:
                     clauses.append(f"{col_prefix}closed_at>=?")
                     params.append(start_utc.isoformat())
@@ -552,16 +555,33 @@ class AnalyticsLedger:
                         continue
                     lots.append(d)
 
+                pos_clauses = ["status='OPEN'"]
+                pos_params: list = []
+                if account_f:
+                    pos_clauses.append("account_id=?")
+                    pos_params.append(account_f)
+                if exchange_f not in ("ALL", ""):
+                    pos_clauses.append(
+                        "EXISTS (SELECT 1 FROM exchange_fills ef WHERE ef.account_id=trade_positions.account_id AND ef.market=trade_positions.market AND LOWER(ef.exchange)=?)"
+                    )
+                    pos_params.append(exchange_f.lower())
                 open_pos = [
                     dict(r)
-                    for r in (
-                        conn.execute("SELECT * FROM trade_positions WHERE status='OPEN' AND account_id=?", (account_f,))
-                        if account_f
-                        else conn.execute("SELECT * FROM trade_positions WHERE status='OPEN'")
+                    for r in conn.execute(
+                        f"SELECT * FROM trade_positions WHERE {' AND '.join(pos_clauses)}",
+                        tuple(pos_params),
                     ).fetchall()
                 ]
-                fill_where = " AND account_id=?" if account_f else ""
-                fill_p = (account_f,) if account_f else ()
+                fill_clauses = []
+                fill_p_list: list = []
+                if account_f:
+                    fill_clauses.append("account_id=?")
+                    fill_p_list.append(account_f)
+                if exchange_f not in ("ALL", ""):
+                    fill_clauses.append("LOWER(exchange)=?")
+                    fill_p_list.append(exchange_f.lower())
+                fill_where = (" AND " + " AND ".join(fill_clauses)) if fill_clauses else ""
+                fill_p = tuple(fill_p_list)
                 buy_fills = conn.execute(
                     f"SELECT fill_amount, fee_krw_equiv, filled_at, market, execution_origin FROM exchange_fills WHERE side='BUY'{fill_where}",
                     fill_p,
