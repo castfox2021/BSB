@@ -304,3 +304,19 @@ def test_member_upbit_sync_orders_and_trades_isolation(tmp_path, monkeypatch):
         # Member B must not see Member A's synced trades or accounts
         assert client.get("/api/member/accounts", headers=h_b).json()["items"] == []
         assert client.get("/api/member/trades", headers=h_b).json()["total"] == 0
+
+        # Member must be blocked from /api/admin/members, Admin can view metadata only
+        assert client.get("/api/admin/members", headers=h_a).status_code == 401
+        a_tok = client.post(
+            "/api/auth/login",
+            headers=HEADERS,
+            json={"username": "admin", "password": "bsb1234!"},
+        ).json()["token"]
+        members_res = client.get("/api/admin/members", headers={**HEADERS, "x-bsb-admin-session": a_tok})
+        assert members_res.status_code == 200
+        items = members_res.json()["items"]
+        up_a = next(m for m in items if m["email"] == "upa@example.com")
+        assert up_a["exchanges"] == ["UPBIT"]
+        assert up_a["credentials_count"] == 1
+        assert "password_hash" not in up_a
+        assert "totp_secret" not in up_a

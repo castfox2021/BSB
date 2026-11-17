@@ -1209,6 +1209,34 @@ def create_app(
             ]
         return {"items": rows}
 
+    @app.get("/api/admin/members")
+    def get_admin_members(limit: int = 100):
+        lim = max(1, min(limit, 500))
+        with store.connect() as conn:
+            users = conn.execute(
+                "SELECT id, email, role, mfa_enabled, created_at FROM users ORDER BY created_at DESC LIMIT ?",
+                (lim,),
+            ).fetchall()
+            cred_rows = conn.execute(
+                "SELECT user_id, exchange FROM user_exchange_credentials"
+            ).fetchall()
+        by_user: dict[str, list[str]] = {}
+        for cr in cred_rows:
+            by_user.setdefault(cr["user_id"], []).append(cr["exchange"])
+        items = [
+            {
+                "id": u["id"],
+                "email": u["email"],
+                "role": u["role"],
+                "mfa_enabled": bool(u["mfa_enabled"]),
+                "exchanges": sorted(set(by_user.get(u["id"], []))),
+                "credentials_count": len(by_user.get(u["id"], [])),
+                "created_at": u["created_at"],
+            }
+            for u in users
+        ]
+        return {"items": items}
+
     @app.get("/api/admin/pg-migration/preview")
     def get_pg_migration_preview():
         from .pg_migration import generate_pg_ddl, inspect_sqlite_counts

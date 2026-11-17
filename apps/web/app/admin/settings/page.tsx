@@ -13,6 +13,7 @@ export default function AdminSettingsPage() {
   const [mfaCode, setMfaCode] = useState('');
   const [mfaMsg, setMfaMsg] = useState('');
   const [pgPreview, setPgPreview] = useState<{ counts: Record<string, number>; ddl_preview: string } | null>(null);
+  const [members, setMembers] = useState<{ id: string; email: string; role: string; mfa_enabled: boolean; exchanges: string[]; credentials_count: number; created_at: string }[]>([]);
 
   useEffect(() => {
     api<Board>('board?buy_page=1&sell_page=1')
@@ -24,6 +25,9 @@ export default function AdminSettingsPage() {
       .catch(() => {});
     api<{ counts: Record<string, number>; ddl_preview: string }>('admin/pg-migration/preview')
       .then(setPgPreview)
+      .catch(() => {});
+    api<{ items: { id: string; email: string; role: string; mfa_enabled: boolean; exchanges: string[]; credentials_count: number; created_at: string }[] }>('admin/members')
+      .then((d) => setMembers(d.items ?? []))
       .catch(() => {});
   }, [rev]);
 
@@ -111,6 +115,48 @@ export default function AdminSettingsPage() {
             </pre>
           </details>
         )}
+
+        <section className="rounded-xl border border-[#1E2536] bg-[#121620] p-6 text-xs">
+          <div className="flex items-center justify-between">
+            <div>
+              <h3 className="text-base font-semibold text-zinc-100">가입 회원 현황 (보안 메타데이터)</h3>
+              <p className="mt-1 text-zinc-400">회원의 API 키 평문이나 개인 잔고는 조회되지 않으며 연결 거래소·MFA 상태만 표시됩니다.</p>
+            </div>
+            <span className="font-mono text-zinc-400">총 {members.length}명</span>
+          </div>
+          {members.length === 0 ? (
+            <p className="mt-3 text-zinc-500">가입된 회원이 없습니다.</p>
+          ) : (
+            <div className="mt-3 overflow-x-auto rounded-lg border border-[#1E2536] bg-[#0E1119]">
+              <table className="w-full text-left font-mono text-[11px]">
+                <thead className="border-b border-[#1E2536] text-zinc-400">
+                  <tr>
+                    <th className="px-3 py-2">이메일</th>
+                    <th className="px-3 py-2">역할</th>
+                    <th className="px-3 py-2">2FA(MFA)</th>
+                    <th className="px-3 py-2">연동 거래소</th>
+                    <th className="px-3 py-2 text-right">가입일</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-[#1E2536]/60">
+                  {members.map((m) => (
+                    <tr key={m.id}>
+                      <td className="px-3 py-2 text-zinc-200">{m.email}</td>
+                      <td className="px-3 py-2 text-zinc-300">{m.role}</td>
+                      <td className={`px-3 py-2 ${m.mfa_enabled ? 'text-emerald-400' : 'text-zinc-500'}`}>
+                        {m.mfa_enabled ? '활성' : '미설정'}
+                      </td>
+                      <td className="px-3 py-2 text-zinc-300">
+                        {m.exchanges.length > 0 ? `${m.exchanges.join(', ')} (${m.credentials_count})` : '—'}
+                      </td>
+                      <td className="px-3 py-2 text-right text-zinc-500">{m.created_at.slice(0, 10)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </section>
       </div>
     </AdminShell>
   );
