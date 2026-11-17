@@ -57,6 +57,7 @@ export default function MemberDashboardPage() {
   const [deletePassword, setDeletePassword] = useState('');
   const [memberSummary, setMemberSummary] = useState<{ trade_count: number; realized_pnl_krw: string; win_rate: string | null } | null>(null);
   const [byCoin, setByCoin] = useState<CoinStat[]>([]);
+  const [dailyPnl, setDailyPnl] = useState<{ date: string; pnl_krw: string }[]>([]);
   const [memberBalances, setMemberBalances] = useState<MemberBalance[]>([]);
   const [memberTrades, setMemberTrades] = useState<MemberTrade[]>([]);
   const [tradesPage, setTradesPage] = useState(1);
@@ -109,6 +110,7 @@ export default function MemberDashboardPage() {
     setCreds(c.items ?? []);
     if (a?.summary) setMemberSummary(a.summary);
     setByCoin(a?.charts?.by_market ?? []);
+    setDailyPnl(a?.charts?.daily_pnl ?? []);
     setMemberBalances(bal.items ?? []);
     setMemberTrades(tr.items ?? []);
     setTradesPage(1);
@@ -133,6 +135,7 @@ export default function MemberDashboardPage() {
     ]);
     if (a?.summary) setMemberSummary(a.summary);
     setByCoin(a?.charts?.by_market ?? []);
+    setDailyPnl(a?.charts?.daily_pnl ?? []);
     setMemberTrades(tr.items ?? []);
     setTradesPage(1);
     setTradesTotal(Number(tr.total ?? (tr.items ?? []).length));
@@ -481,6 +484,35 @@ export default function MemberDashboardPage() {
               })}
             </div>
           )}
+          {dailyPnl.length > 0 && (() => {
+            const recent = dailyPnl.slice(-14);
+            const maxAbs = Math.max(1, ...recent.map((d) => Math.abs(Number(d.pnl_krw ?? 0))));
+            return (
+              <div className="mt-4 rounded-lg border border-[#1E2536] bg-[#0E1119] p-3 font-mono text-[10px]">
+                <div className="mb-2 flex items-center justify-between text-zinc-400">
+                  <span>일별 실현손익 추이 (최근 {recent.length}일)</span>
+                  <span>최대폭 ±{Math.round(maxAbs).toLocaleString('ko-KR')}원</span>
+                </div>
+                <div className="flex h-24 items-end gap-1.5">
+                  {recent.map((d) => {
+                    const v = Number(d.pnl_krw ?? 0);
+                    const pct = Math.max(8, Math.round((Math.abs(v) / maxAbs) * 100));
+                    return (
+                      <div key={d.date} className="flex flex-1 flex-col items-center gap-1" title={`${d.date}: ${v >= 0 ? '+' : ''}${Math.round(v).toLocaleString('ko-KR')}원`}>
+                        <div className="flex h-16 w-full items-end justify-center">
+                          <div
+                            style={{ height: `${pct}%` }}
+                            className={`w-full max-w-[24px] rounded-t ${v >= 0 ? 'bg-emerald-500/70' : 'bg-rose-500/70'}`}
+                          />
+                        </div>
+                        <span className="text-[9px] text-zinc-500">{d.date.slice(5)}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          })()}
           {visibleBalances.length > 0 && (
             <div className="mt-4 overflow-x-auto rounded-lg border border-[#1E2536] bg-[#0E1119]">
               <table className="w-full text-left font-mono text-[11px]">
