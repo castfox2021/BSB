@@ -1852,10 +1852,10 @@ def create_app(
         }
 
     @app.get("/api/member/analytics")
-    def member_analytics(request: Request, exchange: str = "ALL"):
+    def member_analytics(request: Request, exchange: str = "ALL", period: str = "all", market: str = "ALL"):
         uid, _ = _current_user(request)
         return app.state.analytics_ledger.query_analytics(
-            {"mode": "LIVE", "period": "all", "account_id": f"member:{uid}", "exchange": exchange}
+            {"mode": "LIVE", "period": period, "market": market, "account_id": f"member:{uid}", "exchange": exchange}
         )
 
     def _normalize_open_order(exchange_name: str, o: dict) -> dict:
@@ -1928,10 +1928,12 @@ def create_app(
         return {"items": items, "errors": errors}
 
     @app.get("/api/member/trades")
-    def member_trades(request: Request, page: int = 1, page_size: int = 20, exchange: str = "ALL"):
+    def member_trades(
+        request: Request, page: int = 1, page_size: int = 20, exchange: str = "ALL", period: str = "all", market: str = "ALL"
+    ):
         uid, _ = _current_user(request)
         data = app.state.analytics_ledger.query_analytics(
-            {"mode": "LIVE", "period": "all", "account_id": f"member:{uid}", "exchange": exchange}
+            {"mode": "LIVE", "period": period, "market": market, "account_id": f"member:{uid}", "exchange": exchange}
         )
         items = data["trades"]
         total = len(items)
@@ -1946,13 +1948,13 @@ def create_app(
         }
 
     @app.get("/api/member/export")
-    def member_export(request: Request, format: str = "csv", exchange: str = "ALL"):
+    def member_export(request: Request, format: str = "csv", exchange: str = "ALL", period: str = "all", market: str = "ALL"):
         uid, _ = _current_user(request)
         fmt = format.strip().lower()
         if fmt not in ("csv", "json", "xlsx"):
             fmt = "csv"
         content, media_type, filename = app.state.analytics_ledger.export_data(
-            fmt, {"mode": "LIVE", "period": "all", "account_id": f"member:{uid}", "exchange": exchange}
+            fmt, {"mode": "LIVE", "period": period, "market": market, "account_id": f"member:{uid}", "exchange": exchange}
         )
         return Response(
             content=content,

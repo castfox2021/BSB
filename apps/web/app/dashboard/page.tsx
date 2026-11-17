@@ -67,8 +67,17 @@ export default function MemberDashboardPage() {
   const [bithumbPrices, setBithumbPrices] = useState<Record<string, number>>({});
   const [upbitPrices, setUpbitPrices] = useState<Record<string, number>>({});
   const [exFilter, setExFilter] = useState<'ALL' | 'BITHUMB' | 'UPBIT'>('ALL');
+  const [periodFilter, setPeriodFilter] = useState<'all' | 'today' | '7d' | '30d'>('all');
+  const [marketInput, setMarketInput] = useState('');
+  const [marketFilter, setMarketFilter] = useState('');
   const [msg, setMsg] = useState('');
   const [err, setErr] = useState('');
+
+  function normalizeMarketParam(raw: string): string {
+    const m = raw.trim().toUpperCase();
+    if (!m) return 'ALL';
+    return m.includes('-') ? m : `KRW-${m}`;
+  }
 
   async function refreshPrices() {
     const [bt, ut, strat] = await Promise.all([
@@ -81,13 +90,18 @@ export default function MemberDashboardPage() {
     setWatchingItems(strat?.watching_items ?? []);
   }
 
-  async function load(ex: 'ALL' | 'BITHUMB' | 'UPBIT' = exFilter) {
+  async function load(
+    ex: 'ALL' | 'BITHUMB' | 'UPBIT' = exFilter,
+    period: 'all' | 'today' | '7d' | '30d' = periodFilter,
+    marketRaw: string = marketFilter,
+  ) {
+    const mParam = normalizeMarketParam(marketRaw);
     const [s, c, a, bal, tr, oo, sess] = await Promise.all([
       fetch('/api/manual/auth/session').then((r) => r.json()).catch(() => null),
       fetch('/api/manual/member/credentials').then((r) => (r.ok ? r.json() : { items: [] })).catch(() => ({ items: [] })),
-      fetch(`/api/manual/member/analytics?exchange=${ex}`).then((r) => (r.ok ? r.json() : null)).catch(() => null),
+      fetch(`/api/manual/member/analytics?exchange=${ex}&period=${period}&market=${encodeURIComponent(mParam)}`).then((r) => (r.ok ? r.json() : null)).catch(() => null),
       fetch('/api/manual/member/accounts').then((r) => (r.ok ? r.json() : { items: [] })).catch(() => ({ items: [] })),
-      fetch(`/api/manual/member/trades?page=1&page_size=20&exchange=${ex}`).then((r) => (r.ok ? r.json() : { items: [], total: 0 })).catch(() => ({ items: [], total: 0 })),
+      fetch(`/api/manual/member/trades?page=1&page_size=20&exchange=${ex}&period=${period}&market=${encodeURIComponent(mParam)}`).then((r) => (r.ok ? r.json() : { items: [], total: 0 })).catch(() => ({ items: [], total: 0 })),
       fetch('/api/manual/member/open-orders').then((r) => (r.ok ? r.json() : { items: [] })).catch(() => ({ items: [] })),
       fetch('/api/manual/member/sessions').then((r) => (r.ok ? r.json() : { items: [] })).catch(() => ({ items: [] })),
     ]);
@@ -104,11 +118,18 @@ export default function MemberDashboardPage() {
     await refreshPrices();
   }
 
-  async function changeExFilter(ex: 'ALL' | 'BITHUMB' | 'UPBIT') {
-    setExFilter(ex);
+  async function applyFilters(
+    nextEx: 'ALL' | 'BITHUMB' | 'UPBIT',
+    nextPeriod: 'all' | 'today' | '7d' | '30d',
+    nextMarket: string,
+  ) {
+    setExFilter(nextEx);
+    setPeriodFilter(nextPeriod);
+    setMarketFilter(nextMarket);
+    const mParam = normalizeMarketParam(nextMarket);
     const [a, tr] = await Promise.all([
-      fetch(`/api/manual/member/analytics?exchange=${ex}`).then((r) => (r.ok ? r.json() : null)).catch(() => null),
-      fetch(`/api/manual/member/trades?page=1&page_size=20&exchange=${ex}`).then((r) => (r.ok ? r.json() : { items: [], total: 0 })).catch(() => ({ items: [], total: 0 })),
+      fetch(`/api/manual/member/analytics?exchange=${nextEx}&period=${nextPeriod}&market=${encodeURIComponent(mParam)}`).then((r) => (r.ok ? r.json() : null)).catch(() => null),
+      fetch(`/api/manual/member/trades?page=1&page_size=20&exchange=${nextEx}&period=${nextPeriod}&market=${encodeURIComponent(mParam)}`).then((r) => (r.ok ? r.json() : { items: [], total: 0 })).catch(() => ({ items: [], total: 0 })),
     ]);
     if (a?.summary) setMemberSummary(a.summary);
     setByCoin(a?.charts?.by_market ?? []);
@@ -118,7 +139,10 @@ export default function MemberDashboardPage() {
   }
 
   async function loadTradesPage(nextPage: number) {
-    const tr = await fetch(`/api/manual/member/trades?page=${nextPage}&page_size=20&exchange=${exFilter}`)
+    const mParam = normalizeMarketParam(marketFilter);
+    const tr = await fetch(
+      `/api/manual/member/trades?page=${nextPage}&page_size=20&exchange=${exFilter}&period=${periodFilter}&market=${encodeURIComponent(mParam)}`,
+    )
       .then((r) => (r.ok ? r.json() : { items: [], total: 0 }))
       .catch(() => ({ items: [], total: 0 }));
     setTradesPage(nextPage);
@@ -282,12 +306,19 @@ export default function MemberDashboardPage() {
     setMsg('비밀번호가 변경되었습니다.');
   }
 
+  const mNeedle = marketFilter.trim().toUpperCase().replace(/^KRW-/, '');
   const visibleBalances = memberBalances.filter((b) => {
-    if (exFilter === 'ALL') return true;
     const isUpbit = b.currency.startsWith('UPBIT:');
-    return exFilter === 'UPBIT' ? isUpbit : !isUpbit;
+    if (exFilter !== 'ALL' && (exFilter === 'UPBIT' ? !isUpbit : isUpbit)) return false;
+    if (!mNeedle) return true;
+    const sym = (isUpbit ? b.currency.slice(6) : b.currency).toUpperCase();
+    return sym.includes(mNeedle);
   });
-  const visibleOpenOrders = openOrders.filter((o) => exFilter === 'ALL' || o.exchange === exFilter);
+  const visibleOpenOrders = openOrders.filter((o) => {
+    if (exFilter !== 'ALL' && o.exchange !== exFilter) return false;
+    if (!mNeedle) return true;
+    return o.market.toUpperCase().includes(mNeedle);
+  });
 
   let totalEvalKrw = 0;
   let totalUnrealizedKrw = 0;
@@ -348,7 +379,7 @@ export default function MemberDashboardPage() {
                 <button
                   key={ex}
                   type="button"
-                  onClick={() => changeExFilter(ex)}
+                  onClick={() => applyFilters(ex, periodFilter, marketFilter)}
                   className={`rounded-lg px-2.5 py-1.5 font-mono text-[11px] font-semibold ${
                     exFilter === ex ? 'bg-zinc-100 text-zinc-950' : 'border border-[#1E2536] bg-[#0E1119] text-zinc-400'
                   }`}
@@ -360,6 +391,56 @@ export default function MemberDashboardPage() {
                 내 계좌 동기화
               </button>
             </div>
+          </div>
+          <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-[#1E2536] pt-3">
+            <div className="flex flex-wrap items-center gap-1.5 font-mono text-[11px]">
+              {([
+                ['all', '전체 기간'],
+                ['today', '오늘'],
+                ['7d', '7일'],
+                ['30d', '30일'],
+              ] as const).map(([p, label]) => (
+                <button
+                  key={p}
+                  type="button"
+                  onClick={() => applyFilters(exFilter, p, marketFilter)}
+                  className={`rounded-lg px-2.5 py-1 ${
+                    periodFilter === p ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40' : 'border border-[#1E2536] bg-[#0E1119] text-zinc-400'
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                applyFilters(exFilter, periodFilter, marketInput);
+              }}
+              className="flex items-center gap-1.5 font-mono text-[11px]"
+            >
+              <input
+                value={marketInput}
+                onChange={(e) => setMarketInput(e.target.value)}
+                placeholder="종목 검색 (예: BTC)"
+                className="w-36 rounded-lg border border-[#1E2536] bg-[#0E1119] px-2.5 py-1 text-zinc-100 placeholder:text-zinc-500"
+              />
+              <button type="submit" className="rounded-lg border border-[#2A344B] bg-[#181E2B] px-2.5 py-1 text-zinc-200">
+                적용
+              </button>
+              {marketFilter && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMarketInput('');
+                    applyFilters(exFilter, periodFilter, '');
+                  }}
+                  className="rounded-lg border border-[#1E2536] bg-[#0E1119] px-2 py-1 text-zinc-400"
+                >
+                  초기화
+                </button>
+              )}
+            </form>
           </div>
           <div className="mt-4 grid grid-cols-2 gap-3 font-mono sm:grid-cols-5">
             <div className="rounded-lg border border-[#1E2536] bg-[#0E1119] p-3">
@@ -552,13 +633,13 @@ export default function MemberDashboardPage() {
                 </div>
               )}
               <a
-                href={`/api/manual/member/export?format=csv&exchange=${exFilter}`}
+                href={`/api/manual/member/export?format=csv&exchange=${exFilter}&period=${periodFilter}&market=${encodeURIComponent(normalizeMarketParam(marketFilter))}`}
                 className="rounded border border-[#2A344B] bg-[#181E2B] px-2.5 py-1 text-zinc-200 hover:border-zinc-400"
               >
                 CSV 내보내기
               </a>
               <a
-                href={`/api/manual/member/export?format=json&exchange=${exFilter}`}
+                href={`/api/manual/member/export?format=json&exchange=${exFilter}&period=${periodFilter}&market=${encodeURIComponent(normalizeMarketParam(marketFilter))}`}
                 className="rounded border border-[#2A344B] bg-[#181E2B] px-2.5 py-1 text-zinc-200 hover:border-zinc-400"
               >
                 JSON
