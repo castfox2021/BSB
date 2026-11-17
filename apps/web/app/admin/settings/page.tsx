@@ -12,6 +12,7 @@ export default function AdminSettingsPage() {
   const [mfaSecret, setMfaSecret] = useState('');
   const [mfaCode, setMfaCode] = useState('');
   const [mfaMsg, setMfaMsg] = useState('');
+  const [pgPreview, setPgPreview] = useState<{ counts: Record<string, number>; ddl_preview: string } | null>(null);
 
   useEffect(() => {
     api<Board>('board?buy_page=1&sell_page=1')
@@ -20,6 +21,9 @@ export default function AdminSettingsPage() {
     fetch('/api/manual/auth/session')
       .then((r) => r.json())
       .then((s) => setMfaEnabled(Boolean(s.mfa_enabled)))
+      .catch(() => {});
+    api<{ counts: Record<string, number>; ddl_preview: string }>('admin/pg-migration/preview')
+      .then(setPgPreview)
       .catch(() => {});
   }, [rev]);
 
@@ -89,6 +93,24 @@ export default function AdminSettingsPage() {
           )}
           {mfaMsg && <p className="mt-3 font-medium text-emerald-400">{mfaMsg}</p>}
         </section>
+
+        {pgPreview && (
+          <details className="rounded-xl border border-[#1E2536] bg-[#121620] p-6 text-xs">
+            <summary className="cursor-pointer font-semibold text-zinc-200">
+              PostgreSQL 다중 회원제 마이그레이션 준비 현황
+            </summary>
+            <div className="mt-3 flex flex-wrap gap-2 font-mono text-[11px] text-zinc-400">
+              {Object.entries(pgPreview.counts).map(([tbl, cnt]) => (
+                <span key={tbl} className="rounded border border-[#1E2536] bg-[#0E1119] px-2.5 py-1">
+                  {tbl}: {cnt}건
+                </span>
+              ))}
+            </div>
+            <pre className="mt-3 max-h-64 overflow-auto rounded-lg border border-[#1E2536] bg-[#0B0E14] p-3 font-mono text-[11px] text-zinc-400">
+              {pgPreview.ddl_preview}
+            </pre>
+          </details>
+        )}
       </div>
     </AdminShell>
   );

@@ -61,6 +61,7 @@ class ReversionLab:
             cfg.setdefault("exclude_warning_coins", False)
             cfg.setdefault("excluded_symbols", [])
             cfg.setdefault("buy_entry_mode", "immediate")
+            cfg.setdefault("split_buy_enabled", False)
             return cfg
 
     def update_config(self, patch: dict):
@@ -93,6 +94,7 @@ class ReversionLab:
         if mode not in ("immediate", "candle_bounce"):
             raise ValueError("buy_entry_mode는 immediate 또는 candle_bounce여야 합니다.")
         merged["buy_entry_mode"] = mode
+        merged["split_buy_enabled"] = bool(merged.get("split_buy_enabled", False))
         with self.store.connect() as conn:
             conn.execute(
                 "INSERT OR REPLACE INTO strategy_state VALUES('reversion_config',?)",
@@ -835,16 +837,20 @@ class ReversionLab:
                 now_mono = time.monotonic()
                 if symbol not in self.watch:
                     buy_mode = config.get("buy_entry_mode", "immediate")
+                    split_on = bool(config.get("split_buy_enabled", False))
+                    frac = "0.5" if split_on else "1"
                     self.watch[symbol] = {
                         "low": D(row["price"]),
                         "drops": [decimal_text(x) for x in changes],
                         "until": now_mono + 900,
                         "base_bars": 0,
                         "bounce_bought": buy_mode == "immediate",
+                        "split_step": 1 if (buy_mode == "immediate" and split_on) else 0,
+                        "first_buy_price": D(row["price"]) if buy_mode == "immediate" else None,
                     }
                     if buy_mode == "immediate":
-                        self.pending_auto_buys.append({"symbol": symbol, "version_id": "reversion_watch"})
-                        logger.warning("reversion_watch added (immediate): %s", symbol)
+                        self.pending_auto_buys.append({"symbol": symbol, "version_id": "reversion_watch", "fraction": frac})
+                        logger.warning("reversion_watch added (immediate, frac=%s): %s", frac, symbol)
                     else:
                         logger.warning("reversion_watch added (waiting candle_bounce): %s", symbol)
                 else:
@@ -876,8 +882,17 @@ class ReversionLab:
                 last_bar = bars[-1]
                 if D(last_bar["close"]) > D(last_bar["open"]):
                     watched["bounce_bought"] = True
-                    self.pending_auto_buys.append({"symbol": symbol, "version_id": "reversion_watch"})
-                    logger.warning("reversion_watch bounce confirmed (candle_bounce): %s", symbol)
+                    split_on = bool(config.get("split_buy_enabled", False))
+                    frac = "0.5" if split_on else "1"
+                    watched["split_step"] = 1 if split_on else 0
+                    watched["first_buy_price"] = price
+                    self.pending_auto_buys.append({"symbol": symbol, "version_id": "reversion_watch", "fraction": frac})
+                    logger.warning("reversion_watch bounce confirmed (candle_bounce, frac=%s): %s", frac, symbol)
+            if config.get("split_buy_enabled") and watched.get("split_step") == 1 and watched.get("first_buy_price"):
+                if price <= D(watched["first_buy_price"]) * D("0.98"):
+                    watched["split_step"] = 2
+                    self.pending_auto_buys.append({"symbol": symbol, "version_id": "reversion_watch", "fraction": "0.5"})
+                    logger.warning("reversion_watch 2nd split buy (-2%% drop): %s", symbol)
 
             # Drop-Base-Rebound pattern check
             recent_lookback = min(len(bars), 16)

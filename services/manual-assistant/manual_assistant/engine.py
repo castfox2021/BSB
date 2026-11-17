@@ -716,7 +716,8 @@ class Engine:
                 min_total = D(str((chance.get("bid") or {}).get("min_total") or "5000"))
                 bid_fee = max(D(str(chance.get("bid_fee") or "0.0025")), D("0.0025"))
                 max_affordable = int(available_krw / (1 + bid_fee + D("0.001")))
-                order_krw = min(int(budget), max_affordable)
+                item_budget = budget * D(str(item.get("fraction") or "1"))
+                order_krw = min(int(item_budget), max_affordable)
                 logger.warning(
                     "auto_buy chance %s: available_krw=%s, min_total=%s, order_krw=%s",
                     symbol,

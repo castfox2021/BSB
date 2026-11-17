@@ -37,6 +37,7 @@ export default function QuietSettings({ board, onSaved }: { board: Board | null;
     exclude_warning_coins: boolean;
     excluded_symbols: string;
     buy_entry_mode: 'immediate' | 'candle_bounce';
+    split_buy_enabled: boolean;
   } | null>(null);
   const [revMessage, setRevMessage] = useState('');
   const [revIsError, setRevIsError] = useState(false);
@@ -82,6 +83,7 @@ export default function QuietSettings({ board, onSaved }: { board: Board | null;
       exclude_warning_coins?: boolean;
       excluded_symbols?: string[];
       buy_entry_mode?: 'immediate' | 'candle_bounce';
+      split_buy_enabled?: boolean;
     }>('reversion/config')
       .then((c) =>
         setRevConfig({
@@ -93,6 +95,7 @@ export default function QuietSettings({ board, onSaved }: { board: Board | null;
           exclude_warning_coins: Boolean(c.exclude_warning_coins ?? false),
           excluded_symbols: (c.excluded_symbols ?? []).join(', '),
           buy_entry_mode: c.buy_entry_mode === 'candle_bounce' ? 'candle_bounce' : 'immediate',
+          split_buy_enabled: Boolean(c.split_buy_enabled ?? false),
         })
       )
       .catch(() => setRevConfig(null));
@@ -230,6 +233,7 @@ export default function QuietSettings({ board, onSaved }: { board: Board | null;
         exclude_warning_coins: boolean;
         excluded_symbols: string[];
         buy_entry_mode: 'immediate' | 'candle_bounce';
+        split_buy_enabled: boolean;
       }>('reversion/config', 'PATCH', {
         drop_1m: revConfig.drop_1m.trim(),
         drop_1m_confirm_3m: revConfig.drop_1m_confirm_3m.trim(),
@@ -239,6 +243,7 @@ export default function QuietSettings({ board, onSaved }: { board: Board | null;
         exclude_warning_coins: revConfig.exclude_warning_coins,
         excluded_symbols: revConfig.excluded_symbols,
         buy_entry_mode: revConfig.buy_entry_mode,
+        split_buy_enabled: revConfig.split_buy_enabled,
       });
       setRevConfig({
         drop_1m: String(updated.drop_1m),
@@ -249,6 +254,7 @@ export default function QuietSettings({ board, onSaved }: { board: Board | null;
         exclude_warning_coins: Boolean(updated.exclude_warning_coins),
         excluded_symbols: (updated.excluded_symbols ?? []).join(', '),
         buy_entry_mode: updated.buy_entry_mode === 'candle_bounce' ? 'candle_bounce' : 'immediate',
+        split_buy_enabled: Boolean(updated.split_buy_enabled),
       });
       setRevMessage('급락 반등 포착 기준을 저장했습니다.');
       onSaved();
@@ -408,6 +414,15 @@ export default function QuietSettings({ board, onSaved }: { board: Board | null;
                 value={revConfig.excluded_symbols}
                 onChange={(e) => setRevConfig({ ...revConfig, excluded_symbols: e.target.value })}
               />
+            </label>
+            <label className="flex cursor-pointer items-center gap-2 text-xs text-zinc-300">
+              <input
+                type="checkbox"
+                checked={revConfig.split_buy_enabled}
+                onChange={(e) => setRevConfig({ ...revConfig, split_buy_enabled: e.target.checked })}
+                className="h-4 w-4 rounded border-zinc-600 bg-zinc-900 accent-emerald-500"
+              />
+              <span>2분할 매수 사용 (1차 50% 진입 + 추가 -2.0% 하락 시 2차 50% 진입)</span>
             </label>
             <label className="flex cursor-pointer items-center gap-2 text-xs text-zinc-300">
               <input

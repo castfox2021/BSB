@@ -79,6 +79,7 @@ const routes = new Set([
   'member/credentials',
   'member/sync',
   'member/analytics',
+  'member/accounts',
   'public/market/summary',
   'public/market/tickers',
   'public/exchanges/tickers',

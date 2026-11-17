@@ -17,6 +17,7 @@ export default function MemberDashboardPage() {
   const [mfaSecret, setMfaSecret] = useState('');
   const [mfaCode, setMfaCode] = useState('');
   const [memberSummary, setMemberSummary] = useState<{ trade_count: number; realized_pnl_krw: string; win_rate: string | null } | null>(null);
+  const [memberBalances, setMemberBalances] = useState<{ currency: string; balance: string; locked: string }[]>([]);
   const [msg, setMsg] = useState('');
   const [err, setErr] = useState('');
 
@@ -27,6 +28,8 @@ export default function MemberDashboardPage() {
     setCreds(c.items ?? []);
     const a = await fetch('/api/manual/member/analytics').then((r) => (r.ok ? r.json() : null)).catch(() => null);
     if (a?.summary) setMemberSummary(a.summary);
+    const bal = await fetch('/api/manual/member/accounts').then((r) => (r.ok ? r.json() : { items: [] })).catch(() => ({ items: [] }));
+    setMemberBalances(bal.items ?? []);
   }
 
   async function syncMemberAccount() {
@@ -156,6 +159,15 @@ export default function MemberDashboardPage() {
               <p className="mt-1 text-base font-semibold">{memberSummary?.win_rate ? `${memberSummary.win_rate}%` : '—'}</p>
             </div>
           </div>
+          {memberBalances.length > 0 && (
+            <div className="mt-3 flex flex-wrap gap-2 font-mono text-[11px] text-zinc-300">
+              {memberBalances.map((b) => (
+                <span key={b.currency} className="rounded border border-[#1E2536] bg-[#0E1119] px-2.5 py-1">
+                  {b.currency}: {Number(b.balance).toLocaleString('ko-KR', { maximumFractionDigits: 6 })}
+                </span>
+              ))}
+            </div>
+          )}
         </section>
 
         {/* 암호화 API 키 금고 */}

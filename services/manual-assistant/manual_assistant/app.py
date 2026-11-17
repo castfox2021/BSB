@@ -1549,6 +1549,22 @@ def create_app(
         inserted_fills = 0
         try:
             accounts = await client.get("/v1/accounts")
+            if isinstance(accounts, list):
+                with store.connect() as conn:
+                    conn.execute("DELETE FROM private_accounts WHERE account_id=?", (member_acc,))
+                    for acc in accounts:
+                        conn.execute(
+                            "INSERT INTO private_accounts VALUES (?,?,?,?,?,?,?)",
+                            (
+                                member_acc,
+                                str(acc.get("currency") or ""),
+                                str(acc.get("balance") or "0"),
+                                str(acc.get("locked") or "0"),
+                                str(acc.get("avg_buy_price") or "0"),
+                                str(acc.get("unit_currency") or "KRW"),
+                                now(),
+                            ),
+                        )
             orders = await client.get("/v1/orders", {"states[]": "done", "page": 1, "limit": 50, "order_by": "desc"})
             if isinstance(orders, list):
                 with store.connect() as conn:
@@ -1604,6 +1620,20 @@ def create_app(
         return app.state.analytics_ledger.query_analytics(
             {"mode": "LIVE", "period": "all", "account_id": f"member:{uid}"}
         )
+
+    @app.get("/api/member/accounts")
+    def member_accounts(request: Request):
+        uid, _ = _current_user(request)
+        member_acc = f"member:{uid}"
+        with store.connect() as conn:
+            rows = [
+                dict(r)
+                for r in conn.execute(
+                    "SELECT currency,balance,locked,average_price,unit_currency,updated_at FROM private_accounts WHERE account_id=?",
+                    (member_acc,),
+                ).fetchall()
+            ]
+        return {"items": rows}
 
     @app.get("/api/public/exchanges/tickers")
     async def get_public_exchange_tickers(exchange: str = "bithumb", limit: int = 100):
