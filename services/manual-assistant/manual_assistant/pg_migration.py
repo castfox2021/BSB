@@ -92,6 +92,88 @@ CREATE TABLE IF NOT EXISTS trade_positions (
   status TEXT NOT NULL,
   calculation_version TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS trade_lot_allocations (
+  id TEXT PRIMARY KEY,
+  position_id TEXT NOT NULL REFERENCES trade_positions(id) ON DELETE CASCADE,
+  buy_fill_id TEXT NOT NULL,
+  sell_fill_id TEXT NOT NULL,
+  market TEXT NOT NULL,
+  allocated_quantity NUMERIC(36, 18) NOT NULL,
+  allocated_cost NUMERIC(36, 18) NOT NULL,
+  allocated_proceeds NUMERIC(36, 18) NOT NULL,
+  allocated_buy_fee NUMERIC(36, 18) NOT NULL,
+  allocated_sell_fee NUMERIC(36, 18) NOT NULL,
+  realized_pnl NUMERIC(36, 18) NOT NULL,
+  realized_pnl_pct NUMERIC(18, 6),
+  holding_seconds INTEGER NOT NULL DEFAULT 0,
+  opened_at TIMESTAMPTZ NOT NULL,
+  closed_at TIMESTAMPTZ NOT NULL,
+  execution_origin TEXT NOT NULL,
+  strategy_name TEXT,
+  strategy_version TEXT,
+  exit_reason TEXT
+);
+
+CREATE TABLE IF NOT EXISTS analytics_sync_jobs (
+  id TEXT PRIMARY KEY,
+  source TEXT NOT NULL,
+  account_id TEXT NOT NULL,
+  period_start TIMESTAMPTZ,
+  period_end TIMESTAMPTZ,
+  cursor TEXT,
+  status TEXT NOT NULL,
+  records_fetched INTEGER NOT NULL DEFAULT 0,
+  records_inserted INTEGER NOT NULL DEFAULT 0,
+  records_updated INTEGER NOT NULL DEFAULT 0,
+  error_message TEXT,
+  started_at TIMESTAMPTZ NOT NULL,
+  completed_at TIMESTAMPTZ
+);
+
+CREATE TABLE IF NOT EXISTS analytics_reconciliation_issues (
+  id TEXT PRIMARY KEY,
+  account_id TEXT NOT NULL,
+  issue_type TEXT NOT NULL,
+  market TEXT,
+  reference_id TEXT,
+  description TEXT NOT NULL,
+  payload_json JSONB NOT NULL,
+  status TEXT NOT NULL DEFAULT 'OPEN',
+  created_at TIMESTAMPTZ NOT NULL,
+  resolved_at TIMESTAMPTZ
+);
+
+CREATE TABLE IF NOT EXISTS asset_cost_baselines (
+  account_id TEXT NOT NULL,
+  market TEXT NOT NULL,
+  initial_quantity NUMERIC(36, 18) NOT NULL,
+  avg_cost_krw NUMERIC(36, 18) NOT NULL,
+  note TEXT,
+  updated_at TIMESTAMPTZ NOT NULL,
+  PRIMARY KEY(account_id, market)
+);
+
+CREATE TABLE IF NOT EXISTS reversion_positions (
+  id TEXT PRIMARY KEY,
+  policy TEXT NOT NULL,
+  symbol TEXT NOT NULL,
+  status TEXT NOT NULL,
+  quantity NUMERIC(36, 18) NOT NULL,
+  entry_price NUMERIC(36, 18) NOT NULL,
+  cost NUMERIC(36, 18) NOT NULL,
+  net_pnl NUMERIC(36, 18) NOT NULL DEFAULT 0,
+  exit_reason TEXT,
+  opened_at TIMESTAMPTZ NOT NULL,
+  closed_at TIMESTAMPTZ
+);
+
+CREATE TABLE IF NOT EXISTS system_events (
+  id BIGSERIAL PRIMARY KEY,
+  type TEXT NOT NULL,
+  details_json JSONB NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
 """
 
 
@@ -242,3 +324,64 @@ def export_sqlite_to_pg_sql(store) -> tuple[str, dict[str, int]]:
 
     lines.extend(["", "COMMIT;", ""])
     return "\n".join(lines), counts
+
+
+def check_pg_connection_and_parity(store, dsn: str | None = None) -> dict:
+    """Inspect DATABASE_URL PostgreSQL connectivity and compare table row counts vs SQLite."""
+    import os
+
+    target_dsn = (dsn or os.environ.get("DATABASE_URL") or "").strip()
+    sqlite_counts = inspect_sqlite_counts(store)
+    result = {
+        "configured": bool(target_dsn),
+        "driver_available": False,
+        "connected": False,
+        "pg_version": None,
+        "sqlite_counts": sqlite_counts,
+        "pg_counts": {},
+        "parity_ok": False,
+        "error": None,
+    }
+    try:
+        import psycopg  # type: ignore
+
+        result["driver_available"] = True
+    except ImportError:
+        result["error"] = "psycopg 드라이버가 설치되지 않았습니다 (pip install psycopg[binary])."
+        return result
+
+    if not target_dsn:
+        result["error"] = "DATABASE_URL 환경변수가 설정되지 않았습니다."
+        return result
+
+    pg_tables = (
+        "users",
+        "user_exchange_credentials",
+        "exchange_orders",
+        "exchange_fills",
+        "trade_positions",
+        "trade_lot_allocations",
+        "system_events",
+    )
+    try:
+        with psycopg.connect(target_dsn, connect_timeout=4) as pg_conn:
+            with pg_conn.cursor() as cur:
+                cur.execute("SELECT version()")
+                ver_row = cur.fetchone()
+                result["pg_version"] = ver_row[0] if ver_row else None
+                result["connected"] = True
+                pg_counts: dict[str, int] = {}
+                for tbl in pg_tables:
+                    try:
+                        cur.execute(f"SELECT count(*) FROM {tbl}")
+                        pg_counts[tbl] = int(cur.fetchone()[0])
+                    except Exception:
+                        pg_conn.rollback()
+                        pg_counts[tbl] = -1
+                result["pg_counts"] = pg_counts
+                result["parity_ok"] = all(
+                    pg_counts.get(t, -1) == sqlite_counts.get(t, 0) for t in pg_tables
+                )
+    except Exception as exc:
+        result["error"] = f"{type(exc).__name__}: {exc}"
+    return result

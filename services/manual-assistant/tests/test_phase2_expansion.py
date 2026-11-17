@@ -162,6 +162,7 @@ def test_admin_audit_logs_rbac_and_pg_migration_preview(tmp_path):
         # Member must be blocked from admin audit logs & pg preview
         assert client.get("/api/admin/audit-logs", headers={**HEADERS, "x-bsb-admin-session": m_tok}).status_code == 401
         assert client.get("/api/admin/pg-migration/preview", headers={**HEADERS, "x-bsb-admin-session": m_tok}).status_code == 401
+        assert client.get("/api/admin/pg-migration/status", headers={**HEADERS, "x-bsb-admin-session": m_tok}).status_code == 401
         assert client.get("/api/admin/pg-migration/export", headers={**HEADERS, "x-bsb-admin-session": m_tok}).status_code == 401
 
         # Admin can read audit logs, PG DDL & export SQL
@@ -175,6 +176,10 @@ def test_admin_audit_logs_rbac_and_pg_migration_preview(tmp_path):
         pg = client.get("/api/admin/pg-migration/preview", headers=a_h)
         assert pg.status_code == 200
         assert "NUMERIC(36, 18)" in pg.json()["ddl_preview"]
+        assert "trade_lot_allocations" in pg.json()["ddl_preview"]
+        pg_st = client.get("/api/admin/pg-migration/status", headers=a_h)
+        assert pg_st.status_code == 200
+        assert "sqlite_counts" in pg_st.json()
         pg_exp = client.get("/api/admin/pg-migration/export", headers=a_h)
         assert pg_exp.status_code == 200
         assert "bsb-pg-migration.sql" in pg_exp.headers.get("content-disposition", "")

@@ -14,6 +14,14 @@ export default function AdminSettingsPage() {
   const [disableCode, setDisableCode] = useState('');
   const [mfaMsg, setMfaMsg] = useState('');
   const [pgPreview, setPgPreview] = useState<{ counts: Record<string, number>; ddl_preview: string } | null>(null);
+  const [pgStatus, setPgStatus] = useState<{
+    configured: boolean;
+    driver_available: boolean;
+    connected: boolean;
+    pg_version?: string | null;
+    parity_ok: boolean;
+    error?: string | null;
+  } | null>(null);
   const [members, setMembers] = useState<{ id: string; email: string; role: string; mfa_enabled: boolean; exchanges: string[]; credentials_count: number; created_at: string }[]>([]);
 
   useEffect(() => {
@@ -26,6 +34,9 @@ export default function AdminSettingsPage() {
       .catch(() => {});
     api<{ counts: Record<string, number>; ddl_preview: string }>('admin/pg-migration/preview')
       .then(setPgPreview)
+      .catch(() => {});
+    api<{ configured: boolean; driver_available: boolean; connected: boolean; pg_version?: string | null; parity_ok: boolean; error?: string | null }>('admin/pg-migration/status')
+      .then(setPgStatus)
       .catch(() => {});
     api<{ items: { id: string; email: string; role: string; mfa_enabled: boolean; exchanges: string[]; credentials_count: number; created_at: string }[] }>('admin/members')
       .then((d) => setMembers(d.items ?? []))
@@ -151,6 +162,15 @@ export default function AdminSettingsPage() {
                 이관 SQL 다운로드 (.sql)
               </a>
             </div>
+            {pgStatus && (
+              <p className="mt-2 font-mono text-[11px] text-zinc-400">
+                PG 연결:{' '}
+                <span className={pgStatus.connected ? 'text-emerald-400' : 'text-amber-300'}>
+                  {pgStatus.connected ? `연결됨 (${pgStatus.pg_version?.split(' ').slice(0, 2).join(' ')})` : '미연결'}
+                </span>
+                {' · '}정합성: {pgStatus.parity_ok ? '일치' : pgStatus.error ?? '대기'}
+              </p>
+            )}
             <pre className="mt-3 max-h-64 overflow-auto rounded-lg border border-[#1E2536] bg-[#0B0E14] p-3 font-mono text-[11px] text-zinc-400">
               {pgPreview.ddl_preview}
             </pre>

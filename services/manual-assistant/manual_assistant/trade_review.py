@@ -44,10 +44,10 @@ class TradeReview:
             rows = conn.execute(
                 """SELECT * FROM decision_events WHERE symbol=?
                    AND julianday(event_at)<=julianday(?) AND julianday(recorded_at)<=julianday(?)
-                   ORDER BY julianday(event_at),id""",
+                   ORDER BY julianday(event_at) DESC,id DESC LIMIT 500""",
                 (symbol, at, at),
             ).fetchall()
-        return [{**dict(r), "payload": json.loads(r["payload"])} for r in rows]
+        return [{**dict(r), "payload": json.loads(r["payload"])} for r in reversed(rows)]
 
     @decimal_math
     def positions(self):
@@ -69,12 +69,12 @@ class TradeReview:
             }
             signals = {
                 r["id"]: json.loads(r["payload"])
-                for r in conn.execute("SELECT * FROM signals")
+                for r in conn.execute("SELECT id, payload FROM signals ORDER BY generated_at DESC LIMIT 2000")
             }
             decisions = {
                 r["entity_id"]: json.loads(r["payload"])
                 for r in conn.execute(
-                    "SELECT * FROM decision_events WHERE entity_type='SIGNAL'"
+                    "SELECT entity_id, payload FROM decision_events WHERE entity_type='SIGNAL' ORDER BY recorded_at DESC LIMIT 2000"
                 )
             }
             follow_links = {

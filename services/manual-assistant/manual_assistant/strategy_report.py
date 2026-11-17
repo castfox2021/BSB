@@ -493,10 +493,23 @@ class StrategyReportBuilder:
                         )
             else:
                 # LIVE mode: read strictly from private_fills / private_orders
+                pf_clauses: list[str] = []
+                pf_params: list = []
+                if start_utc:
+                    pf_clauses.append("filled_at>=?")
+                    pf_params.append(start_utc.isoformat())
+                if end_utc:
+                    pf_clauses.append("filled_at<=?")
+                    pf_params.append(end_utc.isoformat())
+                if symbol_filter != "ALL":
+                    pf_clauses.append("symbol=?")
+                    pf_params.append(symbol_filter)
+                pf_where = f" WHERE {' AND '.join(pf_clauses)}" if pf_clauses else ""
                 fills = [
                     dict(f)
                     for f in conn.execute(
-                        "SELECT * FROM private_fills ORDER BY filled_at ASC"
+                        f"SELECT * FROM private_fills{pf_where} ORDER BY filled_at ASC",
+                        tuple(pf_params),
                     ).fetchall()
                 ]
                 if not fills:
@@ -534,9 +547,22 @@ class StrategyReportBuilder:
 
             # Signals CSV
             sig_rows = []
+            sig_clauses: list[str] = []
+            sig_params: list = []
+            if start_utc:
+                sig_clauses.append("generated_at>=?")
+                sig_params.append(start_utc.isoformat())
+            if end_utc:
+                sig_clauses.append("generated_at<=?")
+                sig_params.append(end_utc.isoformat())
+            if symbol_filter != "ALL":
+                sig_clauses.append("symbol=?")
+                sig_params.append(symbol_filter)
+            sig_where = f" WHERE {' AND '.join(sig_clauses)}" if sig_clauses else ""
             for s in conn.execute(
-                "SELECT * FROM signals ORDER BY generated_at ASC"
-            ).fetchall():
+                f"SELECT * FROM signals{sig_where} ORDER BY generated_at ASC",
+                tuple(sig_params),
+            ):
                 sd = dict(s)
                 payload = json.loads(sd["payload"]) if sd.get("payload") else {}
                 gen_dt = datetime.fromisoformat(sd["generated_at"])

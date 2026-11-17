@@ -1267,6 +1267,12 @@ def create_app(
             "ddl_preview": generate_pg_ddl(),
         }
 
+    @app.get("/api/admin/pg-migration/status")
+    def get_pg_migration_status():
+        from .pg_migration import check_pg_connection_and_parity
+
+        return check_pg_connection_and_parity(store)
+
     @app.get("/api/admin/pg-migration/export")
     def export_pg_migration_sql():
         from .pg_migration import export_sqlite_to_pg_sql
