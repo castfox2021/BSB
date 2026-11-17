@@ -1,5 +1,5 @@
 'use client';
-import { FormEvent, useEffect, useState } from 'react';
+import { FormEvent, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { PublicHeader } from '../components/public-nav';
@@ -89,6 +89,9 @@ export default function MemberDashboardPage() {
   const [lastAutoSync, setLastAutoSync] = useState('');
   const [msg, setMsg] = useState('');
   const [err, setErr] = useState('');
+  const prevWatchRef = useRef<Set<string> | null>(null);
+  const watchAlertsRef = useRef(false);
+  watchAlertsRef.current = prefs.watch_alerts_enabled;
 
   function normalizeMarketParam(raw: string): string {
     const m = raw.trim().toUpperCase();
@@ -104,7 +107,19 @@ export default function MemberDashboardPage() {
     ]);
     setBithumbPrices(parseTickerPrices(bt?.items ?? []));
     setUpbitPrices(parseTickerPrices(ut?.items ?? []));
-    setWatchingItems(strat?.watching_items ?? []);
+    const nextWatch: { symbol: string; coin_name: string; drops: string[]; base_bars: number }[] = strat?.watching_items ?? [];
+    setWatchingItems(nextWatch);
+    const nextSyms = new Set(nextWatch.map((w) => w.symbol));
+    if (prevWatchRef.current !== null && watchAlertsRef.current) {
+      const newlyAdded = nextWatch.filter((w) => !prevWatchRef.current!.has(w.symbol));
+      if (newlyAdded.length > 0 && typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'granted') {
+        const names = newlyAdded.slice(0, 3).map((w) => w.coin_name || w.symbol.replace('KRW-', '')).join(', ');
+        new Notification('BSB 급락 반등 관찰 포착', {
+          body: `${names}${newlyAdded.length > 3 ? ` 외 ${newlyAdded.length - 3}건` : ''} 관찰 목록에 추가됨`,
+        });
+      }
+    }
+    prevWatchRef.current = nextSyms;
   }
 
   async function load(
