@@ -194,6 +194,9 @@ def create_app(
         analytics_ledger = AnalyticsLedger(store, market)
         app.state.analytics_sync = analytics_sync
         app.state.analytics_ledger = analytics_ledger
+        from .pg_migration import ensure_pg_schema
+
+        ensure_pg_schema(store)
         from .public_api import AdminAuthService
 
         app.state.admin_auth = AdminAuthService(store)

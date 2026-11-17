@@ -218,6 +218,15 @@ def generate_pg_ddl() -> str:
     return PG_DDL
 
 
+def ensure_pg_schema(store) -> bool:
+    """Idempotently create all PostgreSQL tables/indexes in PG_DDL when USE_POSTGRES=1."""
+    if not store.is_postgres_enabled():
+        return False
+    with store.identity_connect() as conn:
+        conn.executescript(PG_DDL)
+    return True
+
+
 def inspect_sqlite_counts(store) -> dict[str, int]:
     tables = (
         "users",
