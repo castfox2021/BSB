@@ -363,7 +363,7 @@ export default function TradingAnalytics() {
               ['총 미실현손익', signedMoney(s.unrealized_pnl_krw), pnlColor(s.unrealized_pnl_krw)],
               ['승률', s.win_rate ? `${s.win_rate}%` : '—', ''],
               ['Profit Factor', s.profit_factor ?? '—', ''],
-              ['최대 낙폭(MDD)', `-${Number(s.max_drawdown_pct).toFixed(2)}%`, 'text-sky-400'],
+              ['최대 낙폭(MDD)', `-${Math.min(100, Math.max(0, Number(s.max_drawdown_pct))).toFixed(2)}%`, 'text-sky-400'],
               ['총 거래 수수료', `${Number(s.total_fees_krw).toLocaleString('ko-KR')}원`, ''],
               ['총 거래 횟수', `${s.trade_count}건 (${s.wins}승 ${s.losses}패)`, ''],
               ['평균 손익비', s.payoff_ratio ?? '—', ''],
@@ -566,9 +566,11 @@ export default function TradingAnalytics() {
               <p className="text-zinc-400">Sortino Ratio</p>
               <p className="mt-1 font-mono text-base font-semibold">{s.sortino_ratio ?? '표본 부족'}</p>
             </div>
-            <div className={subCard}>
-              <p className="text-zinc-400">최대 낙폭 (MDD)</p>
-              <p className="mt-1 font-mono text-base font-semibold text-sky-400">-{s.max_drawdown_pct}%</p>
+            <div className={subCard} title="초기 운용자본 대비 최고점→최저점 최대 낙폭 (0~100% 범위)">
+              <p className="text-zinc-400">최대 낙폭 (MDD) ⓘ</p>
+              <p className="mt-1 font-mono text-base font-semibold text-sky-400">
+                -{Math.min(100, Math.max(0, Number(s.max_drawdown_pct))).toFixed(2)}%
+              </p>
             </div>
             <div className={subCard}>
               <p className="text-zinc-400">미해결 정합성 이슈</p>
