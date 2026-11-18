@@ -27,6 +27,7 @@ type ScannerRow = {
   reason: string;
   candidate: boolean;
   detail_selected: boolean;
+  monitored?: boolean;
   fresh: boolean;
   ready: boolean;
   held: boolean;
@@ -333,8 +334,15 @@ export default function AdminMarketPage() {
                         <td className="px-3 py-2.5 text-right tabular-nums text-zinc-300">{volRatio}</td>
                         <td className="px-3 py-2.5">
                           <StatusBadge
-                            tone={r.fresh ? (r.candidate ? 'profit' : 'ok') : 'warn'}
-                            label={r.fresh ? r.state || '신선' : 'STALE'}
+                            tone={r.fresh ? (r.candidate ? 'profit' : 'ok') : r.monitored ? 'warn' : 'danger'}
+                            label={r.fresh ? r.state || '신선' : r.monitored ? '거래대기' : 'STALE'}
+                            title={
+                              r.fresh
+                                ? '최근 15초 이내 실시간 체결·시세 수신'
+                                : r.monitored
+                                  ? '웹소켓 연결됨 (최근 15초 내 체결 없음)'
+                                  : '시세 웹소켓 미연결 또는 지연'
+                            }
                           />
                         </td>
                         <td className="px-3 py-2.5 text-right">

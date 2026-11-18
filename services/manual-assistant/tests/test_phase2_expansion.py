@@ -661,3 +661,33 @@ def test_member_preferences_and_order_validation(tmp_path):
             json={"exchange": "BITHUMB", "market": "KRW-BTC", "side": "BUY", "ord_type": "limit", "price": "100000000", "volume": "0.001", "confirm": True},
         )
         assert no_key.status_code == 404
+
+
+def test_member_audit_logs_and_admin_safety_reset(tmp_path):
+    app = create_app(tmp_path / "audit_safety.sqlite3")
+    with TestClient(app, base_url="http://127.0.0.1:13000") as client:
+        headers = {"origin": "http://127.0.0.1:13000", "x-bsb-local": "1"}
+        client.post("/api/auth/register", headers=headers, json={"email": "u1@example.com", "password": "password123"})
+        client.post("/api/auth/register", headers=headers, json={"email": "u2@example.com", "password": "password123"})
+        tok1 = client.post("/api/auth/login", headers=headers, json={"username": "u1@example.com", "password": "password123"}).json()["token"]
+        tok2 = client.post("/api/auth/login", headers=headers, json={"username": "u2@example.com", "password": "password123"}).json()["token"]
+        h1 = {**headers, "x-bsb-admin-session": tok1}
+        h2 = {**headers, "x-bsb-admin-session": tok2}
+
+        client.post("/api/member/password", headers=h1, json={"current_password": "password123", "new_password": "newpassword123"})
+        logs1 = client.get("/api/member/audit-logs", headers=h1).json()["items"]
+        logs2 = client.get("/api/member/audit-logs", headers=h2).json()["items"]
+        assert any(item["type"] == "member_password_changed" for item in logs1)
+        assert not any(item["type"] == "member_password_changed" for item in logs2)
+
+        a_tok = client.post("/api/auth/login", headers=headers, json={"username": "admin", "password": "bsb1234!"}).json()["token"]
+        ah = {**headers, "x-bsb-admin-session": a_tok}
+        client.patch("/api/settings", headers=ah, json={"initial_capital_krw": "4500000", "max_entry_krw": "1500000", "daily_loss_alert_krw": "90000", "auto_buy_only": True})
+        res = client.post("/api/admin/safety-reset", headers=ah, json={})
+        assert res.status_code == 200
+        s = res.json()["settings"]
+        assert s["auto_buy_only"] is False
+        assert s["initial_capital_krw"] == "150000"
+        assert s["max_entry_krw"] == "50000"
+        assert s["daily_loss_alert_krw"] == "3000"
+        assert s["stop_loss_rate"] == "0.015"
