@@ -1,14 +1,24 @@
 import {spawn} from 'node:child_process';
-import {existsSync} from 'node:fs';
+import {existsSync,readFileSync} from 'node:fs';
 import {resolve} from 'node:path';
 const root=process.cwd();
+for(const envFile of [resolve(root,'.env'),resolve(root,'data/.env')]){
+ if(!existsSync(envFile)) continue;
+ for(const line of readFileSync(envFile,'utf8').split(/\r?\n/)){
+  const m=line.match(/^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)\s*$/);
+  if(!m) continue;
+  let val=m[2];
+  if((val.startsWith('"')&&val.endsWith('"'))||(val.startsWith("'")&&val.endsWith("'"))) val=val.slice(1,-1);
+  if(process.env[m[1]]===undefined) process.env[m[1]]=val;
+ }
+}
 const python=resolve(root,'services/manual-assistant/.venv/bin/python');
 if(!existsSync(python)) { console.error('먼저 npm run manual:setup 을 실행하세요.');process.exit(1); }
 const apiPort=process.env.MANUAL_API_PORT ?? '18000', webPort=process.env.MANUAL_WEB_PORT ?? '13000', webHost=process.env.MANUAL_WEB_HOST ?? '0.0.0.0';
 if(![apiPort,webPort].every(p=>/^\d+$/.test(p)&&Number(p)>=1024&&Number(p)<=65535)||apiPort===webPort) throw new Error('invalid local ports');
 const env={...process.env,NEXT_TELEMETRY_DISABLED:'1',MANUAL_API_URL:`http://127.0.0.1:${apiPort}`,NEXT_PUBLIC_MANUAL_API_PORT:apiPort,BSB_MANUAL_ORIGINS:process.env.BSB_MANUAL_ORIGINS ?? `http://127.0.0.1:${webPort},http://localhost:${webPort},https://careerbook.kr,http://careerbook.kr,http://careerbook.kr:${webPort},https://careerbook.kr:${webPort},http://www.careerbook.kr:${webPort},https://www.careerbook.kr:${webPort}`};
 const browserEnv={...env};
-for(const key of Object.keys(browserEnv)) if(/BITHUMB|SECRET|ACCESS_KEY|AUTHORIZATION/i.test(key)) delete browserEnv[key];
+for(const key of Object.keys(browserEnv)) if(/BITHUMB|UPBIT|SECRET|ACCESS_KEY|AUTHORIZATION|AUTH_PASSWORD|PASSWORD_HASH|VAULT/i.test(key)) delete browserEnv[key];
 const isProd=process.env.NODE_ENV==='production'||existsSync(resolve(root,'apps/web/.next/BUILD_ID'));
 const webScript=isProd?'start':'dev';
 const children=[spawn(python,['-m','uvicorn','manual_assistant.app:app','--host','127.0.0.1','--port',apiPort,'--no-access-log'],{cwd:root,env,stdio:'inherit',detached:true}),spawn('npm',['run',webScript,'-w','@bsb/web','--','--hostname',webHost,'--port',webPort],{cwd:root,env:browserEnv,stdio:'inherit',detached:true})];
