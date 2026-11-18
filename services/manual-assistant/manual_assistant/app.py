@@ -1300,6 +1300,18 @@ def create_app(
             ]
         return {"items": rows}
 
+    @app.get("/api/admin/sessions")
+    def get_admin_sessions(request: Request):
+        token = request.headers.get("x-bsb-admin-session") or request.cookies.get("bsb_session")
+        return {"items": app.state.admin_auth.list_sessions(token)}
+
+    @app.post("/api/admin/sessions/revoke-others")
+    async def revoke_admin_other_sessions(request: Request):
+        await body(request)
+        token = request.headers.get("x-bsb-admin-session") or request.cookies.get("bsb_session")
+        revoked = app.state.admin_auth.revoke_other_sessions(token)
+        return {"revoked": revoked}
+
     @app.get("/api/admin/members")
     def get_admin_members(limit: int = 100):
         lim = max(1, min(limit, 500))

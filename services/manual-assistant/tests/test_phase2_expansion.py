@@ -691,3 +691,12 @@ def test_member_audit_logs_and_admin_safety_reset(tmp_path):
         assert s["max_entry_krw"] == "50000"
         assert s["daily_loss_alert_krw"] == "3000"
         assert s["stop_loss_rate"] == "0.015"
+
+        # Admin session list & revoke others
+        a_tok2 = client.post("/api/auth/login", headers=headers, json={"username": "admin", "password": "bsb1234!"}).json()["token"]
+        ah2 = {**headers, "x-bsb-admin-session": a_tok2}
+        assert len(client.get("/api/admin/sessions", headers=ah2).json()["items"]) >= 2
+        rev = client.post("/api/admin/sessions/revoke-others", headers=ah2, json={})
+        assert rev.status_code == 200
+        assert rev.json()["revoked"] >= 1
+        assert len(client.get("/api/admin/sessions", headers=ah2).json()["items"]) == 1

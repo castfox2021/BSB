@@ -32,6 +32,7 @@ export default function AdminSettingsPage() {
   const [disableCode, setDisableCode] = useState('');
   const [mfaMsg, setMfaMsg] = useState('');
   const [isHttps, setIsHttps] = useState(true);
+  const [adminSessions, setAdminSessions] = useState<{ username: string; ip: string; created_at: string; is_current: boolean }[]>([]);
 
   // Advanced system states (collapsed by default)
   const [showAdvanced, setShowAdvanced] = useState(false);
@@ -71,6 +72,9 @@ export default function AdminSettingsPage() {
     fetch('/api/manual/auth/session')
       .then((r) => r.json())
       .then((s) => setMfaEnabled(Boolean(s.mfa_enabled)))
+      .catch(() => {});
+    api<{ items?: typeof adminSessions }>('admin/sessions')
+      .then((d) => setAdminSessions(d.items ?? []))
       .catch(() => {});
   }, [rev]);
 
@@ -432,6 +436,46 @@ export default function AdminSettingsPage() {
               </div>
             )}
             {mfaMsg && <span className="text-emerald-400">{mfaMsg}</span>}
+          </div>
+
+          {/* 운영자 활성 세션 관리 */}
+          <div className={`${TOKENS.subCard} space-y-3 p-4`}>
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <span className="font-semibold text-zinc-200">운영자 활성 세션 ({adminSessions.length}개)</span>
+              {adminSessions.length > 1 && (
+                <button
+                  type="button"
+                  onClick={async () => {
+                    const res = await fetch('/api/manual/admin/sessions/revoke-others', {
+                      method: 'POST',
+                      headers: { 'content-type': 'application/json' },
+                      body: '{}',
+                    });
+                    if (res.ok) {
+                      const d = await res.json().catch(() => ({}));
+                      setMfaMsg(`다른 기기 운영자 세션 ${d.revoked ?? 0}건을 만료시켰습니다.`);
+                      setRev((v) => v + 1);
+                    }
+                  }}
+                  className="rounded-lg border border-amber-500/40 bg-amber-500/15 px-3 py-1.5 text-[11px] font-semibold text-amber-300"
+                >
+                  다른 기기 세션 모두 만료
+                </button>
+              )}
+            </div>
+            {adminSessions.length > 0 && (
+              <div className="space-y-1.5 font-mono text-[11px]">
+                {adminSessions.slice(0, 10).map((s, idx) => (
+                  <div key={`${s.created_at}-${idx}`} className="flex items-center justify-between border-b border-[#1E2536]/60 py-1 last:border-0">
+                    <span className="text-zinc-300">
+                      {s.username} · IP {s.ip}{' '}
+                      {s.is_current && <span className="ml-1 rounded bg-emerald-500/15 px-1.5 py-0.5 text-[10px] text-emerald-300">현재 세션</span>}
+                    </span>
+                    <span className="text-zinc-500">{s.created_at.slice(0, 16).replace('T', ' ')}</span>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         </section>
 

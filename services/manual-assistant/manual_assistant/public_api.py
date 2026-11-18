@@ -120,6 +120,35 @@ class AdminAuthService:
             conn.execute("DELETE FROM admin_sessions WHERE token_hash=?", (_hash_token(raw_token),))
         self.store.audit_event("admin_logout", {"ip": ip})
 
+    def list_sessions(self, current_token: str | None) -> list[dict]:
+        cur_hash = _hash_token(current_token) if current_token else ""
+        now_iso = datetime.now(UTC).isoformat()
+        with self.store.identity_connect() as conn:
+            conn.execute("DELETE FROM admin_sessions WHERE expires_at < ?", (now_iso,))
+            rows = conn.execute(
+                "SELECT token_hash, username, ip, expires_at, created_at FROM admin_sessions ORDER BY created_at DESC LIMIT 50"
+            ).fetchall()
+        return [
+            {
+                "username": r["username"],
+                "ip": r["ip"],
+                "expires_at": str(r["expires_at"]),
+                "created_at": str(r["created_at"]),
+                "is_current": bool(cur_hash and hmac.compare_digest(str(r["token_hash"]), cur_hash)),
+            }
+            for r in rows
+        ]
+
+    def revoke_other_sessions(self, current_token: str | None) -> int:
+        if not current_token:
+            return 0
+        cur_hash = _hash_token(current_token)
+        with self.store.identity_connect() as conn:
+            conn.execute("DELETE FROM admin_sessions WHERE token_hash != ?", (cur_hash,))
+            revoked = int(conn.execute("SELECT changes()").fetchone()[0])
+        self.store.audit_event("admin_other_sessions_revoked", {"revoked": revoked})
+        return revoked
+
 
 def public_market_summary(market) -> dict:
     rows = list(getattr(market, "rows", []))
