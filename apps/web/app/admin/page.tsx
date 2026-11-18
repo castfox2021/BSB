@@ -31,6 +31,7 @@ export default function AdminHomePage() {
   const [prices, setPrices] = useState<Record<string, number>>({});
   const [names, setNames] = useState<Record<string, string>>({});
   const [audits, setAudits] = useState<AuditRow[]>([]);
+  const [todayLiveRealized, setTodayLiveRealized] = useState<number>(0);
   const [fetchError, setFetchError] = useState('');
   const [selectedPos, setSelectedPos] = useState<{ kind: 'LIVE' | 'PAPER'; row: PositionRow; raw?: unknown } | null>(null);
 
@@ -38,11 +39,12 @@ export default function AdminHomePage() {
     let active = true;
     const load = async () => {
       try {
-        const [b, acc, ticks, aud] = await Promise.all([
+        const [b, acc, ticks, aud, liveToday] = await Promise.all([
           api<Board>('board?buy_page=1&sell_page=1'),
           api<{ items?: RealAccount[] }>('private/accounts').catch(() => ({ items: [] })),
           api<{ items?: TickerItem[] }>('public/market/tickers?limit=500').catch(() => ({ items: [] })),
           api<{ items?: AuditRow[] }>('admin/audit-logs?limit=5').catch(() => ({ items: [] })),
+          api<{ summary?: { realized_pnl_krw?: string } }>('analytics/query?mode=LIVE&period=today').catch(() => ({ summary: undefined })),
         ]);
         if (!active) return;
         setBoard(b);
@@ -56,6 +58,7 @@ export default function AdminHomePage() {
         setPrices(pmap);
         setNames(nmap);
         setAudits(aud.items ?? []);
+        setTodayLiveRealized(Number(liveToday?.summary?.realized_pnl_krw ?? 0));
         setFetchError('');
       } catch {
         if (active) setFetchError('운영 데이터를 불러올 수 없습니다.');
@@ -113,7 +116,15 @@ export default function AdminHomePage() {
   const realUnrealized = realHeldRows.reduce((sum, r) => sum + (r.pnlKrw ?? 0), 0);
   const paperUnrealized = paperHeldRows.reduce((sum, r) => sum + (r.pnlKrw ?? 0), 0);
   const hasRealUnrealized = realHeldRows.some((r) => r.pnlKrw != null);
-  const todayRealized = Number(board?.summary.today_realized_krw ?? 0);
+  const todayPaperRealized = Number(board?.summary.today_realized_krw ?? 0);
+  const realInvestedKrw = accounts
+    .filter((a) => a.currency !== 'KRW' && Number(a.balance) + Number(a.locked) > 0)
+    .reduce((sum, a) => {
+      const qty = Number(a.balance) + Number(a.locked);
+      const px = prices[`KRW-${a.currency}`] ?? Number(a.average_price || 0);
+      return sum + qty * px;
+    }, 0);
+  const dailyLossUsed = Math.max(0, -todayLiveRealized);
 
   const recentTrades: TradeRow[] = [
     ...(board?.sells.items ?? []).map((t) => ({
@@ -144,10 +155,10 @@ export default function AdminHomePage() {
         {/* 1행: 핵심 상태 카드 (4개) */}
         <section aria-label="핵심 상태 요약" className="grid grid-cols-2 gap-4 lg:grid-cols-4">
           <MetricCard
-            label="오늘 실현손익 (가상)"
-            value={`${krPnlPrefix(todayRealized)}${formatKrw(todayRealized, true)}`}
-            tone={todayRealized > 0 ? 'profit' : todayRealized < 0 ? 'loss' : 'neutral'}
-            subtext="당일 청산 기준"
+            label="오늘 실현손익 (실전)"
+            value={`${krPnlPrefix(todayLiveRealized)}${formatKrw(todayLiveRealized, true)}`}
+            tone={todayLiveRealized > 0 ? 'profit' : todayLiveRealized < 0 ? 'loss' : 'neutral'}
+            subtext={`가상 오늘 ${formatKrw(todayPaperRealized, true)}`}
           />
           <MetricCard
             label="미실현손익 (실전)"
@@ -218,15 +229,15 @@ export default function AdminHomePage() {
               </div>
             </div>
             <div className={`${TOKENS.subCard} p-3`}>
-              <p className="text-[11px] text-zinc-400">일일 손실 한도</p>
-              <p className="mt-1.5 font-mono text-sm font-semibold tabular-nums text-zinc-200">
-                {formatKrw(status.policy?.daily_loss_alert_krw)}
+              <p className="text-[11px] text-zinc-400">일일 손실 사용 / 한도</p>
+              <p className="mt-1.5 font-mono text-xs font-semibold tabular-nums text-zinc-200">
+                {formatKrw(dailyLossUsed)} / {formatKrw(status.policy?.daily_loss_alert_krw)}
               </p>
             </div>
             <div className={`${TOKENS.subCard} p-3`}>
-              <p className="text-[11px] text-zinc-400">운용 자본 / 1회 한도</p>
+              <p className="text-[11px] text-zinc-400">운용 자본 사용 / 기준</p>
               <p className="mt-1.5 font-mono text-xs font-semibold tabular-nums text-zinc-200">
-                {formatKrw(status.policy?.initial_capital_krw)} / {formatKrw(status.policy?.max_entry_krw)}
+                {formatKrw(realInvestedKrw)} / {formatKrw(status.policy?.initial_capital_krw)}
               </p>
             </div>
             <div className={`${TOKENS.subCard} p-3`}>
