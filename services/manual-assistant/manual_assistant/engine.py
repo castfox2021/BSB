@@ -680,12 +680,19 @@ class Engine:
             logger.warning("auto_buy skipped: auto_buy_only is False (%s)", [p["symbol"] for p in pending])
             return
         with self.store.connect() as conn:
-            ctrl_row = conn.execute("SELECT state FROM trading_control WHERE id=1").fetchone()
+            ctrl_row = conn.execute("SELECT state, mode FROM trading_control WHERE id=1").fetchone()
             control_state = ctrl_row[0] if ctrl_row else "STOPPED"
+            control_mode = ctrl_row[1] if ctrl_row and len(ctrl_row) > 1 else "MANUAL_APPROVAL"
             qb_row = conn.execute("SELECT value FROM strategy_state WHERE key='quiet_board'").fetchone()
             follow_version = json.loads(qb_row[0]).get("follow_version") if qb_row else None
-        if control_state == "EMERGENCY_STOP":
-            logger.warning("auto_buy skipped: EMERGENCY_STOP")
+        if control_state != "RUNNING" or control_mode == "MANUAL_APPROVAL":
+            logger.warning("auto_buy skipped: trading_control=%s/%s", control_state, control_mode)
+            return
+        if not follow_version:
+            logger.warning("auto_buy skipped: no active follow_version")
+            return
+        if not getattr(self.market, "connected", False):
+            logger.warning("auto_buy skipped: market feed disconnected")
             return
         if not api_ready:
             logger.warning("auto_buy skipped: bithumb API not configured (%s, code=%s)", [p["symbol"] for p in pending], getattr(self.private_sync, "code", None))
@@ -693,7 +700,7 @@ class Engine:
                 self.store.audit(conn, "auto_buy_skipped", {"reason": "api_not_configured", "count": len(pending)})
             return
         from .manual_orders import OrderTransport
-        budget = D(str(policy.get("max_entry_krw") or "150000"))
+        budget = D(str(policy.get("max_entry_krw") or "50000"))
         if budget <= 0:
             return
         seen_symbols: set[str] = set()
@@ -703,6 +710,12 @@ class Engine:
             if (version_id != "reversion_watch" and version_id != follow_version) or symbol in seen_symbols:
                 continue
             seen_symbols.add(symbol)
+            is_stale, stale_reason = self.market.safe(symbol)
+            if is_stale:
+                logger.warning("auto_buy skipped (%s): market stale (%s)", symbol, stale_reason)
+                with self.store.connect() as conn:
+                    self.store.audit(conn, "auto_buy_skipped", {"symbol": symbol, "reason": f"market_stale:{stale_reason}"})
+                continue
             rev_cfg = self.reversion.config()
             if self.reversion._is_warning_or_suspended(symbol, {}, rev_cfg):
                 logger.warning("auto_buy skipped (%s): market_warning/delisting excluded", symbol)

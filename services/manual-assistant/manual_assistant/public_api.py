@@ -69,8 +69,14 @@ class AdminAuthService:
             return None, 429, "로그인 시도 횟수를 초과했습니다. 5분 후 다시 시도하세요."
 
         expected_user = os.getenv("BSB_AUTH_USER", "admin")
-        expected_pass = os.getenv("BSB_AUTH_PASSWORD", "bsb1234!")
+        expected_pass = os.getenv("BSB_AUTH_PASSWORD")
         expected_hash = os.getenv("BSB_ADMIN_PASSWORD_HASH")
+        if not expected_pass and not expected_hash:
+            if os.getenv("PYTEST_CURRENT_TEST") or os.getenv("BSB_DEV_MODE") == "1":
+                expected_pass = "bsb1234!"
+            else:
+                self.store.audit_event("admin_login_blocked_no_secret", {"ip": ip})
+                return None, 503, "서버 환경변수(BSB_AUTH_PASSWORD 또는 BSB_ADMIN_PASSWORD_HASH)가 설정되지 않았습니다."
 
         user_ok = hmac.compare_digest(username.encode("utf-8"), expected_user.encode("utf-8"))
         pass_ok = verify_password(password, expected_pass, expected_hash)

@@ -216,6 +216,11 @@ def create_app(
                 "UPDATE trading_control SET state='STOPPED',mode='MANUAL_APPROVAL',updated_at=? WHERE id=1",
                 (now(),),
             )
+        if os.getenv("BSB_AUTO_BUY_PERSIST_ON_BOOT") != "1":
+            cur_settings = store.settings()
+            if cur_settings.get("auto_buy_only"):
+                cur_settings["auto_buy_only"] = False
+                store.save_settings(cur_settings)
         app.state.storage = store
         app.state.market = market
         app.state.engine = engine
@@ -712,6 +717,27 @@ def create_app(
     @app.get("/api/settings")
     def settings():
         return store.settings()
+
+    @app.post("/api/admin/safety-reset")
+    async def admin_safety_reset(request: Request):
+        await body(request)
+        safe_defaults = Settings().model_dump()
+        safe_defaults["stop_loss_rate"] = "0.015"
+        safe_defaults["auto_buy_only"] = False
+        store.save_settings(safe_defaults)
+        with store.connect() as conn:
+            conn.execute(
+                "UPDATE trading_control SET state='STOPPED',mode='MANUAL_APPROVAL',updated_at=? WHERE id=1",
+                (now(),),
+            )
+        store.audit_event(
+            "admin_safety_reset",
+            {
+                "initial_capital_krw": safe_defaults["initial_capital_krw"],
+                "max_entry_krw": safe_defaults["max_entry_krw"],
+            },
+        )
+        return {"reset": True, "settings": safe_defaults}
 
     @app.patch("/api/settings")
     async def change_settings(request: Request):

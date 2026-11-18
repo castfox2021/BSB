@@ -17,11 +17,18 @@ export default function AdminShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
   const [autoBuyOnly, setAutoBuyOnly] = useState(false);
+  const [controlState, setControlState] = useState<string>('STOPPED');
+  const [controlMode, setControlMode] = useState<string>('MANUAL_APPROVAL');
 
   useEffect(() => {
-    api<Policy>('settings')
-      .then((p) => setAutoBuyOnly(Boolean(p.auto_buy_only)))
-      .catch(() => {});
+    Promise.all([
+      api<Policy>('settings').catch(() => null),
+      api<{ state?: string; mode?: string }>('trading/control').catch(() => null),
+    ]).then(([p, ctrl]) => {
+      if (p) setAutoBuyOnly(Boolean(p.auto_buy_only));
+      if (ctrl?.state) setControlState(ctrl.state);
+      if (ctrl?.mode) setControlMode(ctrl.mode);
+    });
   }, [pathname]);
 
   async function logout() {
@@ -44,12 +51,18 @@ export default function AdminShell({ children }: { children: ReactNode }) {
               </Link>
               <span
                 className={`rounded-md border px-2.5 py-1 text-xs font-medium ${
-                  autoBuyOnly
+                  autoBuyOnly && controlState === 'RUNNING' && controlMode !== 'MANUAL_APPROVAL'
                     ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300'
-                    : 'border-[#1E2536] bg-[#121620] text-zinc-400'
+                    : autoBuyOnly
+                      ? 'border-amber-500/40 bg-amber-500/10 text-amber-300'
+                      : 'border-[#1E2536] bg-[#121620] text-zinc-400'
                 }`}
               >
-                {autoBuyOnly ? '자동 실전매수 켜짐 (매도 수동)' : 'API 주문 꺼짐'}
+                {autoBuyOnly && controlState === 'RUNNING' && controlMode !== 'MANUAL_APPROVAL'
+                  ? '자동 실전매수 실행 중 (매도 수동)'
+                  : autoBuyOnly
+                    ? `자동매수 대기 (관제 ${controlState} · 실전매수 차단됨)`
+                    : 'API 주문 꺼짐'}
               </span>
             </div>
             <div className="flex items-center gap-2 text-xs">

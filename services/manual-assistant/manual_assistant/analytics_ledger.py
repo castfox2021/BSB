@@ -625,7 +625,15 @@ class AnalyticsLedger:
         )
 
         # Cumulative equity, MDD, streaks, daily/monthly/hourly/weekday/market/origin/strategy
-        equity = D("150000")
+        base_cap = D("150000")
+        try:
+            s_cap = (self.store.settings() or {}).get("initial_capital_krw")
+            if s_cap:
+                base_cap = max(base_cap, D(str(s_cap)))
+        except Exception:
+            pass
+        max_lot_cost = max((_d(l["allocated_cost"]) for l in lots), default=D(0))
+        equity = max(base_cap, max_lot_cost)
         peak_eq = equity
         max_dd = D(0)
         cur_win_s = cur_loss_s = max_win_s = max_loss_s = 0
@@ -638,21 +646,16 @@ class AnalyticsLedger:
         origin_map: dict[str, dict] = {}
         strategy_map: dict[str, dict] = {}
         returns_pct: list[float] = []
+        sell_group_pnl: dict[str, Decimal] = {}
 
         for l in lots:
             pnl = _d(l["realized_pnl"])
             cost = _d(l["allocated_cost"])
-            if pnl > 0:
-                cur_win_s += 1
-                cur_loss_s = 0
-                max_win_s = max(max_win_s, cur_win_s)
-            elif pnl < 0:
-                cur_loss_s += 1
-                cur_win_s = 0
-                max_loss_s = max(max_loss_s, cur_loss_s)
+            sell_key = str(l.get("sell_fill_id") or l["id"])
+            sell_group_pnl[sell_key] = sell_group_pnl.get(sell_key, D(0)) + pnl
             equity += pnl
             peak_eq = max(peak_eq, equity)
-            dd = ((peak_eq - equity) / peak_eq * 100) if peak_eq > 0 else D(0)
+            dd = min(D("100"), max(D(0), ((peak_eq - equity) / peak_eq * 100) if peak_eq > 0 else D(0)))
             max_dd = max(max_dd, dd)
 
             closed_kst = datetime.fromisoformat(l["closed_at"]).astimezone(KST)
@@ -707,6 +710,16 @@ class AnalyticsLedger:
                     "drawdown_pct": _fmt(dd, 3),
                 }
             )
+
+        for gpnl in sell_group_pnl.values():
+            if gpnl > 0:
+                cur_win_s += 1
+                cur_loss_s = 0
+                max_win_s = max(max_win_s, cur_win_s)
+            elif gpnl < 0:
+                cur_loss_s += 1
+                cur_win_s = 0
+                max_loss_s = max(max_loss_s, cur_loss_s)
 
         sharpe = None
         sortino = None

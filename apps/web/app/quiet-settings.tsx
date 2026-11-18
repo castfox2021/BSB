@@ -285,7 +285,7 @@ export default function QuietSettings({ board, onSaved }: { board: Board | null;
         <p className="mt-2 text-xs text-zinc-400">
           기본은 가상매매 모드입니다. 아래 옵션을 켜면 추종 전략이 매수 신호를 포착할 때만 빗썸 시장가 매수를 자동 실행합니다. 손절·익절 매도는 자동으로 실행하지 않으며, 주문 가능 원화 자금이 부족하면 가상매수로만 기록됩니다.
         </p>
-        <div className="mt-4 space-y-2">
+        <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
           <label className="inline-flex cursor-pointer items-center gap-2.5 text-sm font-medium text-zinc-200">
             <input
               type="checkbox"
@@ -296,8 +296,27 @@ export default function QuietSettings({ board, onSaved }: { board: Board | null;
             />
             <span>신호 포착 시 자동 실전 매수 (매수만 자동 · 매도는 수동)</span>
           </label>
-          {autoBuyMessage && <p className="text-xs font-medium text-emerald-400">{autoBuyMessage}</p>}
+          <button
+            type="button"
+            disabled={busy}
+            onClick={async () => {
+              if (!window.confirm('자동 실전매수를 끄고 자본 한도를 기본 안전값(15만원 / 회당 5만원 / 일손실 3천원 / 손절 -1.5%)으로 복원하시겠습니까?')) return;
+              const d = await fetch('/api/manual/admin/safety-reset', {
+                method: 'POST',
+                headers: { 'content-type': 'application/json' },
+                body: '{}',
+              }).then((r) => (r.ok ? r.json() : null)).catch(() => null);
+              if (d?.settings) {
+                setForm(d.settings);
+                setAutoBuyMessage('긴급 안전 초기화 완료: 자동매수 OFF · 15만원 / 5만원 / 3천원 복원');
+              }
+            }}
+            className="rounded-lg border border-rose-500/40 bg-rose-500/15 px-3 py-1.5 text-xs font-semibold text-rose-300 hover:bg-rose-500/25 disabled:opacity-50"
+          >
+            긴급 안전 초기화 (자동매수 OFF · 15만/5만/3천원)
+          </button>
         </div>
+        {autoBuyMessage && <p className="mt-2 text-xs font-medium text-emerald-400">{autoBuyMessage}</p>}
       </div>
 
       {/* 1-2. 급락 반등 포착 기준 (실전 자동매수 연동) */}

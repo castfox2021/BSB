@@ -135,7 +135,16 @@ export default function FullMarketScanner({ onPick }: { onPick: (symbol: string)
 
       <p className="mt-3 font-mono text-[11px] tabular-nums text-zinc-500">
         유동성 검사 예산 {money(s?.analysis_budget_krw)} · 목록 갱신 {kst(s?.universe_refreshed_at)} · 분석 간격{' '}
-        {s?.detail_interval_seconds ?? '—'}초 · {s?.overloaded ? '부하 조절 중' : '정상 감시'}
+        {s?.detail_interval_seconds ?? '—'}초 ·{' '}
+        {s?.watch_count && (s?.fresh_count ?? 0) < s.watch_count * 0.5 ? (
+          <span className="font-semibold text-rose-400">
+            시세 지연/누락 경고 (신선 {s?.fresh_count ?? 0}/{s?.watch_count} · 신규 실전매수 차단)
+          </span>
+        ) : s?.overloaded ? (
+          '부하 조절 중'
+        ) : (
+          '정상 감시'
+        )}
       </p>
 
       <div className="mt-4 flex flex-wrap items-center gap-3 text-xs">
