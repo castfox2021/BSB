@@ -1,0 +1,18 @@
+# Automatic HTTPS reverse proxy for BSB (Caddy 2)
+# Usage on Ubuntu/Debian:
+#   apt install -y caddy
+#   cp infra/caddy/Caddyfile /etc/caddy/Caddyfile
+#   systemctl reload caddy
+
+careerbook.kr, www.careerbook.kr {
+	encode gzip zstd
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "SAMEORIGIN"
+		Referrer-Policy "strict-origin-when-cross-origin"
+	}
+
+	reverse_proxy 127.0.0.1:13000
+}

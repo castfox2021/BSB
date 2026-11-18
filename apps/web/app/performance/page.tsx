@@ -34,7 +34,7 @@ export default function PublicPerformancePage() {
               <p className="font-mono text-zinc-300">{p.policy}</p>
               <p className={`mt-2 font-mono text-xl font-semibold ${pnlColor(p.realized)}`}>{signedMoney(p.realized)}</p>
               <p className="mt-2 font-mono text-zinc-400">
-                {p.trades}건 · 승률 {p.win_rate ? `${(Number(p.win_rate) * 100).toFixed(1)}%` : '—'} · PF {p.profit_factor ?? '—'} · MDD -{(Number(p.max_drawdown) * 100).toFixed(2)}%
+                {p.trades}건 · 승률 {p.win_rate ? `${(Number(p.win_rate) * 100).toFixed(1)}%` : '—'} · PF {p.profit_factor ?? '—'} · MDD -{Math.min(100, Math.max(0, Number(p.max_drawdown) * 100)).toFixed(2)}%
               </p>
             </div>
           ))}

@@ -34,6 +34,15 @@ export default function PublicStrategiesPage() {
           </p>
         </div>
 
+        <section className="rounded-xl border border-[#1E2536] bg-[#121620] p-5 text-xs">
+          <h2 className="text-sm font-semibold text-zinc-100">급락 반등 주전략 기준 (Structure Trailing)</h2>
+          <p className="mt-1.5 text-zinc-400">
+            구조 손절 최대 <span className="font-mono text-sky-400">-1.5%</span> · 수익{' '}
+            <span className="font-mono text-rose-400">+2.0%</span> 도달 시 트레일링 활성화 · 최고가 대비{' '}
+            <span className="font-mono text-zinc-200">-1.0%</span> 하락 시 청산 · 상승 추세 중 시간 청산 제외
+          </p>
+        </section>
+
         <section className="rounded-xl border border-[#1E2536] bg-[#121620] p-6">
           <h2 className="text-base font-semibold">현재 반등 관찰 종목 ({data?.watching_count ?? 0}종목)</h2>
           <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
@@ -78,7 +87,9 @@ export default function PublicStrategiesPage() {
                     <td className="py-2.5">{c.trades}건</td>
                     <td className="py-2.5">{c.win_rate ? `${(Number(c.win_rate) * 100).toFixed(1)}%` : '—'}</td>
                     <td className={`py-2.5 ${pnlColor(c.realized_krw)}`}>{signedMoney(c.realized_krw)}</td>
-                    <td className="py-2.5 text-sky-400">-{(Number(c.max_drawdown) * 100).toFixed(2)}%</td>
+                    <td className="py-2.5 text-sky-400">
+                      -{Math.min(100, Math.max(0, Number(c.max_drawdown) * 100)).toFixed(2)}%
+                    </td>
                   </tr>
                 ))}
               </tbody>
