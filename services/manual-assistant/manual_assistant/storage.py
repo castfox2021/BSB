@@ -235,6 +235,15 @@ class Storage:
                 for row in conn.execute("SELECT key,value FROM settings")
             }
 
+    def save_settings(self, values: dict):
+        at = datetime.now(UTC).isoformat()
+        with self.connect() as conn:
+            for key, value in values.items():
+                conn.execute(
+                    "INSERT OR REPLACE INTO settings (key, value, updated_at) VALUES (?,?,?)",
+                    (key, json.dumps(value), at),
+                )
+
     def initialize_market(self):
         self.path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
         with self.connect() as conn:
