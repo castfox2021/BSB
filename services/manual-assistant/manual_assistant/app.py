@@ -2235,6 +2235,35 @@ def create_app(
         token = request.headers.get("x-bsb-admin-session") or request.cookies.get("bsb_session")
         return {"items": app.state.identity.list_active_sessions(uid, token)}
 
+    @app.get("/api/member/audit-logs")
+    def member_audit_logs(request: Request, limit: int = 30):
+        uid, _ = _current_user(request)
+        lim = max(1, min(limit, 100))
+        items: list[dict] = []
+        with store.identity_connect() as conn:
+            rows = conn.execute(
+                "SELECT id, type, details_json, created_at FROM system_events WHERE type LIKE 'member_%' OR type LIKE 'user_%' ORDER BY id DESC LIMIT 300"
+            ).fetchall()
+        for r in rows:
+            raw = r["details_json"]
+            try:
+                details = raw if isinstance(raw, dict) else json.loads(raw)
+            except Exception:
+                continue
+            if not isinstance(details, dict) or details.get("user_id") != uid:
+                continue
+            items.append(
+                {
+                    "id": r["id"],
+                    "type": r["type"],
+                    "details": {k: v for k, v in details.items() if k != "user_id"},
+                    "created_at": str(r["created_at"]),
+                }
+            )
+            if len(items) >= lim:
+                break
+        return {"items": items}
+
     @app.post("/api/member/sessions/revoke-others")
     async def member_revoke_other_sessions(request: Request):
         await body(request)

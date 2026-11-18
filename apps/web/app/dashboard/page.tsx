@@ -75,6 +75,7 @@ export default function MemberDashboardPage() {
   const [openOrders, setOpenOrders] = useState<{ exchange: string; uuid: string; market: string; side: string; price: string; remaining_volume: string; created_at: string }[]>([]);
   const [watchingItems, setWatchingItems] = useState<{ symbol: string; coin_name: string; drops: string[]; base_bars: number }[]>([]);
   const [activeSessions, setActiveSessions] = useState<{ ip: string; created_at: string; is_current: boolean }[]>([]);
+  const [auditLogs, setAuditLogs] = useState<{ id: number; type: string; details: Record<string, unknown>; created_at: string }[]>([]);
   const [bithumbPrices, setBithumbPrices] = useState<Record<string, number>>({});
   const [upbitPrices, setUpbitPrices] = useState<Record<string, number>>({});
   const [exFilter, setExFilter] = useState<'ALL' | 'BITHUMB' | 'UPBIT'>('ALL');
@@ -135,7 +136,7 @@ export default function MemberDashboardPage() {
     marketRaw: string = marketFilter,
   ) {
     const mParam = normalizeMarketParam(marketRaw);
-    const [s, c, a, bal, tr, oo, sess, pr] = await Promise.all([
+    const [s, c, a, bal, tr, oo, sess, pr, aud] = await Promise.all([
       fetch('/api/manual/auth/session').then((r) => r.json()).catch(() => null),
       fetch('/api/manual/member/credentials').then((r) => (r.ok ? r.json() : { items: [] })).catch(() => ({ items: [] })),
       fetch(`/api/manual/member/analytics?exchange=${ex}&period=${period}&market=${encodeURIComponent(mParam)}`).then((r) => (r.ok ? r.json() : null)).catch(() => null),
@@ -144,6 +145,7 @@ export default function MemberDashboardPage() {
       fetch('/api/manual/member/open-orders').then((r) => (r.ok ? r.json() : { items: [] })).catch(() => ({ items: [] })),
       fetch('/api/manual/member/sessions').then((r) => (r.ok ? r.json() : { items: [] })).catch(() => ({ items: [] })),
       fetch('/api/manual/member/preferences').then((r) => (r.ok ? r.json() : null)).catch(() => null),
+      fetch('/api/manual/member/audit-logs?limit=20').then((r) => (r.ok ? r.json() : { items: [] })).catch(() => ({ items: [] })),
     ]);
     setSession(s);
     setCreds(c.items ?? []);
@@ -158,6 +160,7 @@ export default function MemberDashboardPage() {
     setOpenOrders(oo.items ?? []);
     setActiveSessions(sess.items ?? []);
     if (pr && typeof pr.auto_sync_enabled === 'boolean') setPrefs(pr);
+    setAuditLogs(aud.items ?? []);
     await refreshPrices();
   }
 
@@ -1266,6 +1269,25 @@ export default function MemberDashboardPage() {
                     IP: {s.ip} {s.is_current && <span className="ml-1.5 rounded bg-emerald-500/20 px-1.5 py-0.5 text-[10px] text-emerald-300">현재 기기</span>}
                   </span>
                   <span className="text-zinc-500">{s.created_at.slice(0, 16).replace('T', ' ')}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
+
+        {/* 내 최근 활동 · 보안 이력 */}
+        <section className="rounded-xl border border-[#1E2536] bg-[#121620] p-6 text-xs">
+          <h2 className="text-base font-semibold">내 최근 활동 · 보안 이력 ({auditLogs.length}건)</h2>
+          <p className="mt-1 text-zinc-400">본인 계정의 주문 실행·취소·비밀번호 변경 등 주요 활동 이력만 격리 표시됩니다.</p>
+          {auditLogs.length === 0 ? (
+            <p className="mt-3 text-zinc-500">기록된 활동 이력이 없습니다.</p>
+          ) : (
+            <div className="mt-3 space-y-1.5 font-mono text-[11px]">
+              {auditLogs.map((a) => (
+                <div key={a.id} className="flex flex-wrap items-center justify-between gap-2 rounded border border-[#1E2536] bg-[#0E1119] px-3 py-2">
+                  <span className="text-zinc-200">{a.type}</span>
+                  <span className="text-zinc-400">{Object.keys(a.details).length > 0 ? JSON.stringify(a.details) : ''}</span>
+                  <span className="text-zinc-500">{a.created_at.slice(0, 16).replace('T', ' ')}</span>
                 </div>
               ))}
             </div>
