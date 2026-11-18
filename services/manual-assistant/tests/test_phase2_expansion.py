@@ -612,3 +612,52 @@ def test_postgres_identity_compat_adapter(tmp_path, monkeypatch):
     admin_auth = AdminAuthService(store)
     admin_auth.login("admin", "bsb1234!", ip="127.0.0.1")
     assert any("INSERT INTO admin_sessions" in sql for sql, _ in executed)
+
+
+def test_member_preferences_and_order_validation(tmp_path):
+    app = create_app(tmp_path / "member_prefs_orders.sqlite3")
+    with TestClient(app, base_url="http://127.0.0.1:13000") as client:
+        headers = {"origin": "http://127.0.0.1:13000", "x-bsb-local": "1"}
+        reg = client.post(
+            "/api/auth/register",
+            headers=headers,
+            json={"email": "order_member@example.com", "password": "strongpassword123"},
+        )
+        assert reg.status_code == 200
+        login = client.post(
+            "/api/auth/login",
+            headers=headers,
+            json={"username": "order_member@example.com", "password": "strongpassword123"},
+        )
+        assert login.status_code == 200
+        h = {**headers, "x-bsb-admin-session": login.json()["token"]}
+
+        g0 = client.get("/api/member/preferences", headers=h)
+        assert g0.status_code == 200
+        assert g0.json()["auto_sync_enabled"] is False
+
+        p1 = client.put(
+            "/api/member/preferences",
+            headers=h,
+            json={"auto_sync_enabled": True, "auto_sync_interval_sec": 30, "watch_alerts_enabled": True},
+        )
+        assert p1.status_code == 200
+        assert p1.json() == {"auto_sync_enabled": True, "auto_sync_interval_sec": 30, "watch_alerts_enabled": True}
+
+        g1 = client.get("/api/member/preferences", headers=h)
+        assert g1.status_code == 200
+        assert g1.json()["auto_sync_interval_sec"] == 30
+
+        no_confirm = client.post(
+            "/api/member/orders",
+            headers=h,
+            json={"exchange": "BITHUMB", "market": "KRW-BTC", "side": "BUY", "ord_type": "limit", "price": "100000000", "volume": "0.001"},
+        )
+        assert no_confirm.status_code == 400
+
+        no_key = client.post(
+            "/api/member/orders",
+            headers=h,
+            json={"exchange": "BITHUMB", "market": "KRW-BTC", "side": "BUY", "ord_type": "limit", "price": "100000000", "volume": "0.001", "confirm": True},
+        )
+        assert no_key.status_code == 404

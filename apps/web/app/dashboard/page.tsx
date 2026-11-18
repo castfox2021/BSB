@@ -195,6 +195,18 @@ export default function MemberDashboardPage() {
     setTradesTotal(Number(tr.total ?? (tr.items ?? []).length));
   }
 
+  function selectOrderTarget(exchange: 'BITHUMB' | 'UPBIT', market: string, side: 'BUY' | 'SELL') {
+    setOrderExchange(exchange);
+    setOrderMarket(market);
+    setOrderSide(side);
+    const liveP = (exchange === 'UPBIT' ? upbitPrices[market] : bithumbPrices[market]) ?? 0;
+    setOrderPrice(liveP > 0 && orderType === 'limit' ? String(liveP) : '');
+    setOrderVolume('');
+    if (typeof document !== 'undefined') {
+      document.getElementById('member-order-box')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+  }
+
   async function submitMemberOrder(e: FormEvent) {
     e.preventDefault();
     setErr('');
@@ -757,7 +769,12 @@ export default function MemberDashboardPage() {
                     const pnlKrw = hasLivePnl ? (curPrice - avg) * qty : 0;
                     const pnlPct = hasLivePnl ? ((curPrice - avg) / avg) * 100 : 0;
                     return (
-                      <tr key={b.currency}>
+                      <tr
+                        key={b.currency}
+                        onClick={() => sym !== 'KRW' && selectOrderTarget(isUpbit ? 'UPBIT' : 'BITHUMB', market, 'SELL')}
+                        className={sym !== 'KRW' ? 'cursor-pointer hover:bg-[#161B26]' : ''}
+                        title={sym !== 'KRW' ? '클릭하여 간편 매도 주문창에 채우기' : undefined}
+                      >
                         <td className="px-3 py-2 text-zinc-200">
                           <span className="mr-1.5 rounded bg-[#181E2B] px-1.5 py-0.5 text-[10px] text-zinc-400">
                             {isUpbit ? 'UPBIT' : 'BITHUMB'}
@@ -788,7 +805,7 @@ export default function MemberDashboardPage() {
         </section>
 
         {/* 간편 수동 주문 (내 API 키) */}
-        <section className="rounded-xl border border-[#1E2536] bg-[#121620] p-6 text-xs">
+        <section id="member-order-box" className="rounded-xl border border-[#1E2536] bg-[#121620] p-6 text-xs">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div>
               <h2 className="text-base font-semibold">간편 수동 주문 (내 API 키)</h2>
@@ -981,14 +998,17 @@ export default function MemberDashboardPage() {
                     (b) => (b.currency.startsWith('UPBIT:') ? b.currency.slice(6) : b.currency) === w.symbol.replace('KRW-', '') && Number(b.balance) > 0
                   );
                   return (
-                    <span
+                    <button
+                      type="button"
                       key={w.symbol}
-                      className={`rounded border px-2.5 py-1 ${
+                      onClick={() => selectOrderTarget('BITHUMB', w.symbol, 'BUY')}
+                      title="클릭하여 간편 매수 주문창에 채우기"
+                      className={`rounded border px-2.5 py-1 transition hover:border-zinc-400 ${
                         heldMatch ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300' : 'border-[#1E2536] bg-[#0E1119] text-zinc-300'
                       }`}
                     >
                       {w.coin_name} ({w.symbol.replace('KRW-', '')}) · 횡보 {w.base_bars}분{heldMatch ? ' · 보유중' : ''}
-                    </span>
+                    </button>
                   );
                 })}
               </div>
