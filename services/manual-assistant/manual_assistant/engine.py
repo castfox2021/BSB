@@ -691,7 +691,10 @@ class Engine:
         if not follow_version:
             logger.warning("auto_buy skipped: no active follow_version")
             return
-        if not getattr(self.market, "connected", False):
+        market_ok = bool(getattr(self.market, "enabled", False)) and any(
+            getattr(self.market, "connections", {}).values()
+        )
+        if not market_ok:
             logger.warning("auto_buy skipped: market feed disconnected")
             return
         if not api_ready:
@@ -710,11 +713,11 @@ class Engine:
             if (version_id != "reversion_watch" and version_id != follow_version) or symbol in seen_symbols:
                 continue
             seen_symbols.add(symbol)
-            is_stale, stale_reason = self.market.safe(symbol)
-            if is_stale:
-                logger.warning("auto_buy skipped (%s): market stale (%s)", symbol, stale_reason)
+            is_safe, safe_reason = self.market.safe(symbol)
+            if not is_safe:
+                logger.warning("auto_buy skipped (%s): market unsafe (%s)", symbol, safe_reason)
                 with self.store.connect() as conn:
-                    self.store.audit(conn, "auto_buy_skipped", {"symbol": symbol, "reason": f"market_stale:{stale_reason}"})
+                    self.store.audit(conn, "auto_buy_skipped", {"symbol": symbol, "reason": f"market_unsafe:{safe_reason}"})
                 continue
             rev_cfg = self.reversion.config()
             if self.reversion._is_warning_or_suspended(symbol, {}, rev_cfg):

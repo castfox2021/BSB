@@ -46,8 +46,8 @@ class Settings(BaseModel):
     max_entry_krw: str = "50000"
     minimum_cash_reserve_krw: str = "50000"
     max_positions: int = 2
-    stop_loss_rate: str = "0.008"
-    take_profit_rate: str = "0.012"
+    stop_loss_rate: str = "0.015"
+    take_profit_rate: str = "0.02"
     daily_loss_alert_krw: str = "3000"
     max_holding_seconds: int = 900
     consecutive_losses_limit: int = 3

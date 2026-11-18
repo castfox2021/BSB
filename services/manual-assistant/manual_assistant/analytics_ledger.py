@@ -520,7 +520,7 @@ class AnalyticsLedger:
                 if exchange_f not in ("ALL", ""):
                     clauses.append("LOWER(ef.exchange)=?")
                     params.append(exchange_f.lower())
-                lot_base = f"SELECT l.*, ef.exchange AS exchange FROM trade_lot_allocations l {' '.join(lot_joins)}"
+                lot_base = f"SELECT l.*, ef.exchange AS exchange, ef.exchange_order_id AS sell_order_id FROM trade_lot_allocations l {' '.join(lot_joins)}"
                 if start_utc:
                     clauses.append(f"{col_prefix}closed_at>=?")
                     params.append(start_utc.isoformat())
@@ -651,7 +651,7 @@ class AnalyticsLedger:
         for l in lots:
             pnl = _d(l["realized_pnl"])
             cost = _d(l["allocated_cost"])
-            sell_key = str(l.get("sell_fill_id") or l["id"])
+            sell_key = str(l.get("sell_order_id") or l.get("sell_fill_id") or l["id"])
             sell_group_pnl[sell_key] = sell_group_pnl.get(sell_key, D(0)) + pnl
             equity += pnl
             peak_eq = max(peak_eq, equity)
