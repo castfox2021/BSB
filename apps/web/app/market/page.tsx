@@ -19,10 +19,12 @@ export default function PublicMarketPage() {
   const [exchange, setExchange] = useState<'bithumb' | 'upbit'>('bithumb');
   const [items, setItems] = useState<Ticker[]>([]);
   const [q, setQ] = useState('');
+  const [page, setPage] = useState(1);
+  const pageSize = 25;
 
   useEffect(() => {
     const load = () =>
-      fetch(`/api/manual/public/exchanges/tickers?exchange=${exchange}&limit=150`)
+      fetch(`/api/manual/public/exchanges/tickers?exchange=${exchange}&limit=300`)
         .then((r) => (r.ok ? r.json() : { items: [] }))
         .then((d) => setItems(d.items ?? []))
         .catch(() => {});
@@ -37,6 +39,9 @@ export default function PublicMarketPage() {
       it.symbol.toLowerCase().includes(q.trim().toLowerCase()) ||
       it.coin_name.toLowerCase().includes(q.trim().toLowerCase())
   );
+  const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
+  const safePage = Math.min(page, totalPages);
+  const visibleItems = filtered.slice((safePage - 1) * pageSize, safePage * pageSize);
 
   const fmtPct = (v?: string | null) =>
     v == null ? '—' : `${Number(v) > 0 ? '+' : ''}${(Number(v) * 100).toFixed(2)}%`;
@@ -85,7 +90,7 @@ export default function PublicMarketPage() {
               </tr>
             </thead>
             <tbody className="divide-y divide-[#1E2536]/60">
-              {filtered.map((it) => {
+              {visibleItems.map((it) => {
                 const c1 = exchange === 'upbit' ? it.change_24h : it.change_1m;
                 return (
                   <tr key={it.symbol}>
@@ -111,6 +116,29 @@ export default function PublicMarketPage() {
               )}
             </tbody>
           </table>
+        </div>
+        <div className="flex items-center justify-between font-mono text-xs text-zinc-400">
+          <span>
+            {safePage} / {totalPages} 페이지 · 총 {filtered.length}종목
+          </span>
+          <div className="flex gap-2">
+            <button
+              type="button"
+              disabled={safePage <= 1}
+              onClick={() => setPage(safePage - 1)}
+              className="rounded-lg border border-[#1E2536] bg-[#121620] px-3 py-1.5 text-zinc-200 disabled:opacity-40"
+            >
+              이전
+            </button>
+            <button
+              type="button"
+              disabled={safePage >= totalPages}
+              onClick={() => setPage(safePage + 1)}
+              className="rounded-lg border border-[#1E2536] bg-[#121620] px-3 py-1.5 text-zinc-200 disabled:opacity-40"
+            >
+              다음
+            </button>
+          </div>
         </div>
       </main>
       <PublicFooter />
