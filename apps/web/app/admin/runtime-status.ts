@@ -10,6 +10,7 @@ export type UnifiedAdminStatus = {
   headlineTone: 'ok' | 'warn' | 'danger' | 'neutral';
   actionMessage: string | null;
   orderAllowed: boolean;
+  reversionBuyAllowed: boolean;
   autoBuyOnly: boolean;
   controlState: string;
   controlMode: string;
@@ -30,6 +31,7 @@ export const INITIAL_ADMIN_STATUS: UnifiedAdminStatus = {
   headlineTone: 'neutral',
   actionMessage: null,
   orderAllowed: false,
+  reversionBuyAllowed: false,
   autoBuyOnly: false,
   controlState: 'UNKNOWN',
   controlMode: 'UNKNOWN',
@@ -134,12 +136,15 @@ export async function fetchUnifiedAdminStatus(): Promise<UnifiedAdminStatus> {
     orderAllowed = true;
   }
 
+  const reversionBuyAllowed = controlState !== 'EMERGENCY_STOP' && marketConnected && privateConnected;
+
   return {
     phase: 'ready',
     headline,
     headlineTone,
     actionMessage,
     orderAllowed,
+    reversionBuyAllowed,
     autoBuyOnly,
     controlState,
     controlMode,

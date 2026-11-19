@@ -96,6 +96,10 @@ export function AdminStatusBar({ status }: { status: UnifiedAdminStatus }) {
       <div className={`${TOKENS.container} flex flex-wrap items-center gap-2`}>
         <StatusBadge tone={status.headlineTone} label={status.headline} />
         <StatusBadge
+          tone={status.reversionBuyAllowed ? 'buy' : 'danger'}
+          label={status.reversionBuyAllowed ? '급락 반등 매수 허용' : '급락 반등 매수 차단'}
+        />
+        <StatusBadge
           tone={status.autoBuyOnly ? (status.orderAllowed ? 'ok' : 'warn') : 'neutral'}
           label={status.autoBuyOnly ? '자동매수 ON' : '자동매수 OFF'}
         />

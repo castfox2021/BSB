@@ -81,8 +81,13 @@ export default function AdminLabPage() {
             <section className={`${TOKENS.card} space-y-4 p-5 text-xs`}>
               <SectionHeader
                 title="급락 반등 전략 현재 정책 (Structure Trailing)"
-                subtitle="고정 익절 전략(+1.2%)과는 별도로 동작하는 구조 손절·트레일링 정책입니다."
-                actions={<StatusBadge tone="ok" label="트레일링 정책 적용" />}
+                subtitle="고정 익절 전략(+1.2%)과는 별도로 동작하는 구조 손절·트레일링 정책입니다. 긴급 정지(EMERGENCY_STOP)가 아닌 한 급락 반등 매수는 상시 허용됩니다."
+                actions={
+                  <StatusBadge
+                    tone={status.reversionBuyAllowed ? 'buy' : 'danger'}
+                    label={status.reversionBuyAllowed ? '급락 반등 매수 허용' : '급락 반등 매수 차단'}
+                  />
+                }
               />
               <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
                 <div className={`${TOKENS.subCard} p-3`}>

@@ -676,20 +676,31 @@ class Engine:
             getattr(self.private_sync, "code", None),
             policy.get("max_entry_krw"),
         )
-        if not policy.get("auto_buy_only"):
-            logger.warning("auto_buy skipped: auto_buy_only is False (%s)", [p["symbol"] for p in pending])
-            return
         with self.store.connect() as conn:
             ctrl_row = conn.execute("SELECT state, mode FROM trading_control WHERE id=1").fetchone()
             control_state = ctrl_row[0] if ctrl_row else "STOPPED"
             control_mode = ctrl_row[1] if ctrl_row and len(ctrl_row) > 1 else "MANUAL_APPROVAL"
             qb_row = conn.execute("SELECT value FROM strategy_state WHERE key='quiet_board'").fetchone()
             follow_version = json.loads(qb_row[0]).get("follow_version") if qb_row else None
-        if control_state != "RUNNING" or control_mode == "MANUAL_APPROVAL":
-            logger.warning("auto_buy skipped: trading_control=%s/%s", control_state, control_mode)
+        if control_state == "EMERGENCY_STOP":
+            logger.warning("auto_buy skipped: EMERGENCY_STOP")
             return
-        if not follow_version:
-            logger.warning("auto_buy skipped: no active follow_version")
+        general_allowed = (
+            bool(policy.get("auto_buy_only"))
+            and control_state == "RUNNING"
+            and control_mode != "MANUAL_APPROVAL"
+            and bool(follow_version)
+        )
+        # Reversion crash-rebound signals remain enabled unless EMERGENCY_STOP is active.
+        reversion_items = [p for p in pending if p.get("version_id") == "reversion_watch"]
+        if not general_allowed and not reversion_items:
+            logger.warning(
+                "auto_buy skipped: auto_buy_only=%s trading_control=%s/%s follow_version=%s",
+                bool(policy.get("auto_buy_only")),
+                control_state,
+                control_mode,
+                follow_version,
+            )
             return
         market_ok = bool(getattr(self.market, "enabled", False)) and any(
             getattr(self.market, "connections", {}).values()
@@ -710,15 +721,21 @@ class Engine:
         for item in pending:
             symbol = item["symbol"]
             version_id = item["version_id"]
-            if (version_id != "reversion_watch" and version_id != follow_version) or symbol in seen_symbols:
-                continue
+            is_reversion = version_id == "reversion_watch"
+            if is_reversion:
+                if symbol in seen_symbols:
+                    continue
+            else:
+                if not general_allowed or version_id != follow_version or symbol in seen_symbols:
+                    continue
             seen_symbols.add(symbol)
-            is_safe, safe_reason = self.market.safe(symbol)
-            if not is_safe:
-                logger.warning("auto_buy skipped (%s): market unsafe (%s)", symbol, safe_reason)
-                with self.store.connect() as conn:
-                    self.store.audit(conn, "auto_buy_skipped", {"symbol": symbol, "reason": f"market_unsafe:{safe_reason}"})
-                continue
+            if not is_reversion:
+                is_safe, safe_reason = self.market.safe(symbol)
+                if not is_safe:
+                    logger.warning("auto_buy skipped (%s): market unsafe (%s)", symbol, safe_reason)
+                    with self.store.connect() as conn:
+                        self.store.audit(conn, "auto_buy_skipped", {"symbol": symbol, "reason": f"market_unsafe:{safe_reason}"})
+                    continue
             rev_cfg = self.reversion.config()
             if self.reversion._is_warning_or_suspended(symbol, {}, rev_cfg):
                 logger.warning("auto_buy skipped (%s): market_warning/delisting excluded", symbol)
